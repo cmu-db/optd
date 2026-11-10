@@ -1,5 +1,5 @@
 use std::any::{Any, TypeId, type_name};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
@@ -12,6 +12,13 @@ use crate::{
 };
 
 mod logical_facts;
+pub mod observability;
+
+pub use observability::{
+    ObservationContext, ObservationMetadata, ObservationMode, ObservationPayload,
+    ObservationRecord, ObservationScope, ObservationScopeKind, ObservationScopeStatus,
+    ObservationSession,
+};
 
 pub use logical_facts::{
     BaseColumn, ConstraintSet, LogicalFacts, LogicalFactsAnalysis, ValueEquivalenceClasses,
@@ -603,6 +610,8 @@ pub struct AnalysisContext {
     /// Query-local base-column sketches. Derived operator statistics remain owned by their
     /// demand-driven analyses; a future catalog cache can populate this same boundary.
     column_sketches: ColumnSketchStore,
+    observation: Option<(ObservationSession, u64)>,
+    observation_generation: Cell<u64>,
 }
 
 impl AnalysisContext {
@@ -613,6 +622,8 @@ impl AnalysisContext {
             catalog,
             cardinality_config: CardinalityEstimationConfig::default(),
             column_sketches: BTreeMap::new(),
+            observation: None,
+            observation_generation: Cell::new(0),
         }
     }
 
@@ -706,6 +717,8 @@ impl AnalysisContext {
             catalog,
             cardinality_config,
             column_sketches,
+            observation: None,
+            observation_generation: Cell::new(0),
         }
     }
 
@@ -721,11 +734,96 @@ impl AnalysisContext {
             catalog: Arc::clone(&self.catalog),
             cardinality_config: self.cardinality_config,
             column_sketches: self.column_sketches.clone(),
+            observation: self.observation.as_ref().map(|(session, _)| {
+                let context = session.new_context();
+                (session.clone(), context.id)
+            }),
+            observation_generation: Cell::new(0),
         }
+    }
+
+    /// Attaches this context to an explicitly created observation run.
+    pub fn observe_with(&mut self, session: ObservationSession) {
+        let context = session.new_context();
+        self.observation = Some((session, context.id));
+        self.observation_generation.set(0);
+    }
+
+    /// Returns the session attached to this context, if observation was enabled.
+    pub fn observation_session(&self) -> Option<ObservationSession> {
+        self.observation
+            .as_ref()
+            .map(|(session, _)| session.clone())
+    }
+
+    fn observation_context(&self) -> Option<(ObservationSession, ObservationContext)> {
+        self.observation.as_ref().map(|(session, id)| {
+            (
+                session.clone(),
+                ObservationContext {
+                    id: *id,
+                    generation: self.observation_generation.get(),
+                },
+            )
+        })
+    }
+
+    /// Records a real join-enumeration comparison when detailed observation is enabled.
+    pub(crate) fn observe_candidate_decision(&self, candidate: Operator, retained: bool) {
+        if let Some((session, context)) = self.observation_context()
+            && session.mode() == ObservationMode::DetailedSummary
+        {
+            let scope = session.begin(context, ObservationScopeKind::Candidate(candidate));
+            session.append(
+                Some(scope),
+                ObservationPayload::CandidateDecision {
+                    candidate,
+                    retained,
+                },
+            );
+            session.finish(scope, ObservationScopeStatus::Complete);
+        }
+    }
+
+    /// Finalizes an observed optimization run at its selected root.
+    ///
+    /// Last-plan mode walks the reachable DAG once. Missing cached estimates are computed here and
+    /// marked as post-selection; detailed mode only records the selected root because it already
+    /// retained the decisions that led to it.
+    pub fn finalize_observations(
+        &mut self,
+        ctx: &QueryContext,
+        root: Operator,
+    ) -> AnalysisResult<()> {
+        let Some((session, _)) = self.observation_context() else {
+            return Ok(());
+        };
+        session.selected_root(root);
+        if session.mode() == ObservationMode::DetailedSummary {
+            return Ok(());
+        }
+        let mut seen = HashSet::new();
+        let mut pending = vec![root];
+        while let Some(operator) = pending.pop() {
+            if !seen.insert(operator) {
+                continue;
+            }
+            pending.extend(operator.get(ctx).inputs());
+            let cached = CardinalityEstimationV1::cached_profile(self, operator)?;
+            let post_selection = cached.is_none();
+            let profile = match cached {
+                Some(profile) => profile,
+                None => CardinalityEstimationV1::get_shared(ctx, self, operator)?,
+            };
+            append_operator_summary(&session, None, operator, ctx, &profile, post_selection);
+        }
+        Ok(())
     }
 
     /// Clears every registered analysis cache while preserving analysis instances.
     pub fn clear(&self) {
+        self.observation_generation
+            .set(self.observation_generation.get() + 1);
         for analysis in self.analyses.values() {
             analysis.clear();
         }
@@ -1471,52 +1569,82 @@ impl CachedAnalysis for CardinalityEstimationV1 {
         analyses: &mut AnalysisContext,
         operator: Operator,
     ) -> AnalysisResult<Self::Output> {
-        let mut profile = cardinality_profile(operator, ctx, analyses)?;
-        let facts = LogicalFactsAnalysis::get_shared(ctx, analyses, operator)?;
+        let scope = analyses
+            .observation_context()
+            .and_then(|(session, context)| {
+                (session.mode() == ObservationMode::DetailedSummary).then(|| {
+                    (
+                        session.clone(),
+                        session.begin(context, ObservationScopeKind::Operator(operator)),
+                    )
+                })
+            });
+        let result = (|| {
+            let mut profile = cardinality_profile(operator, ctx, analyses)?;
+            let facts = LogicalFactsAnalysis::get_shared(ctx, analyses, operator)?;
 
-        let mut classes = BTreeMap::<ValueId, BTreeSet<Column>>::new();
-        for (&column, value) in &facts.lineage {
-            if profile.columns.contains_key(&column) {
-                classes
-                    .entry(facts.constraints.canonical(value))
-                    .or_default()
-                    .insert(column);
+            let mut classes = BTreeMap::<ValueId, BTreeSet<Column>>::new();
+            for (&column, value) in &facts.lineage {
+                if profile.columns.contains_key(&column) {
+                    classes
+                        .entry(facts.constraints.canonical(value))
+                        .or_default()
+                        .insert(column);
+                }
+            }
+            let equivalence_classes = classes
+                .into_values()
+                .filter(|columns| columns.len() >= 2)
+                .map(|columns| {
+                    let distinct = columns
+                        .iter()
+                        .filter_map(|column| profile.columns.get(column))
+                        .map(|column| column.distinct.clone())
+                        .min_by(|left, right| left.value.total_cmp(&right.value))
+                        .unwrap_or_else(|| Estimate::default(0.0));
+                    ColumnEquivalenceClass { columns, distinct }
+                })
+                .collect::<Vec<_>>();
+            let lineage_changed = profile.columns.iter().any(|(column, column_profile)| {
+                column_profile.value.as_ref() != facts.lineage.get(column)
+            });
+            let contradiction_changed =
+                facts.constraints.contradictory && profile.rows.value != 0.0;
+            if !lineage_changed
+                && profile.equivalence_classes == equivalence_classes
+                && !contradiction_changed
+            {
+                return Ok(profile);
+            }
+
+            let mutable_profile = Arc::make_mut(&mut profile);
+            for (column, column_profile) in &mut mutable_profile.columns {
+                column_profile.value = facts.lineage.get(column).cloned();
+            }
+            mutable_profile.equivalence_classes = equivalence_classes;
+            cap_equivalent_column_distinct_counts(mutable_profile);
+            if contradiction_changed {
+                *mutable_profile = mutable_profile.cap_by_rows(Estimate::exact(0.0));
+            }
+            Ok(profile)
+        })();
+        if let Some((session, scope_id)) = scope {
+            match &result {
+                Ok(profile) => {
+                    append_operator_summary(
+                        &session,
+                        Some(scope_id),
+                        operator,
+                        ctx,
+                        profile,
+                        false,
+                    );
+                    session.finish(scope_id, ObservationScopeStatus::Complete);
+                }
+                Err(_) => session.finish(scope_id, ObservationScopeStatus::Failed),
             }
         }
-        let equivalence_classes = classes
-            .into_values()
-            .filter(|columns| columns.len() >= 2)
-            .map(|columns| {
-                let distinct = columns
-                    .iter()
-                    .filter_map(|column| profile.columns.get(column))
-                    .map(|column| column.distinct.clone())
-                    .min_by(|left, right| left.value.total_cmp(&right.value))
-                    .unwrap_or_else(|| Estimate::default(0.0));
-                ColumnEquivalenceClass { columns, distinct }
-            })
-            .collect::<Vec<_>>();
-        let lineage_changed = profile.columns.iter().any(|(column, column_profile)| {
-            column_profile.value.as_ref() != facts.lineage.get(column)
-        });
-        let contradiction_changed = facts.constraints.contradictory && profile.rows.value != 0.0;
-        if !lineage_changed
-            && profile.equivalence_classes == equivalence_classes
-            && !contradiction_changed
-        {
-            return Ok(profile);
-        }
-
-        let mutable_profile = Arc::make_mut(&mut profile);
-        for (column, column_profile) in &mut mutable_profile.columns {
-            column_profile.value = facts.lineage.get(column).cloned();
-        }
-        mutable_profile.equivalence_classes = equivalence_classes;
-        cap_equivalent_column_distinct_counts(mutable_profile);
-        if contradiction_changed {
-            *mutable_profile = mutable_profile.cap_by_rows(Estimate::exact(0.0));
-        }
-        Ok(profile)
+        result
     }
 }
 
@@ -1554,7 +1682,85 @@ impl CardinalityEstimationV1 {
         op: Operator,
     ) -> AnalysisResult<Arc<CardinalityProfile>> {
         let analysis = analyses.registry_entry::<Self>();
-        typed_analysis::<Self>(&analysis)?.get_cached(ctx, analyses, op)
+        let estimator = typed_analysis::<Self>(&analysis)?;
+        if let Some(value) = estimator.state().values.borrow().get(&op).cloned() {
+            if let Some((session, _)) = analyses.observation_context()
+                && session.mode() == ObservationMode::DetailedSummary
+            {
+                session.append(None, ObservationPayload::CacheReuse { operator: op });
+            }
+            return Ok(value);
+        }
+        estimator.get_cached(ctx, analyses, op)
+    }
+
+    fn cached_profile(
+        analyses: &mut AnalysisContext,
+        op: Operator,
+    ) -> AnalysisResult<Option<Arc<CardinalityProfile>>> {
+        let analysis = analyses.registry_entry::<Self>();
+        Ok(typed_analysis::<Self>(&analysis)?
+            .state()
+            .values
+            .borrow()
+            .get(&op)
+            .cloned())
+    }
+}
+
+fn operator_kind(operator: Operator, ctx: &QueryContext) -> &'static str {
+    match operator.get(ctx) {
+        OperatorData::Scan(_) => "scan",
+        OperatorData::Selection(_) => "selection",
+        OperatorData::Map(_) => "map",
+        OperatorData::TableFunction(_) => "table_function",
+        OperatorData::Join(_) => "join",
+        OperatorData::CrossProduct(_) => "cross_product",
+        OperatorData::Sort(_) => "sort",
+        OperatorData::Limit(_) => "limit",
+        OperatorData::Aggregation(_) => "aggregation",
+        OperatorData::Projection(_) => "projection",
+        OperatorData::Output(_) => "output",
+        OperatorData::Rename(_) => "rename",
+        OperatorData::ConstScan(_) => "const_scan",
+    }
+}
+
+fn append_operator_summary(
+    session: &ObservationSession,
+    scope_id: Option<u64>,
+    operator: Operator,
+    ctx: &QueryContext,
+    profile: &CardinalityProfile,
+    post_selection: bool,
+) {
+    session.append(
+        scope_id,
+        ObservationPayload::OperatorSummary {
+            operator,
+            kind: operator_kind(operator, ctx),
+            inputs: operator.get(ctx).inputs(),
+            rows: profile.rows.value,
+            source: profile.rows.source,
+            columns: profile.columns.len(),
+            post_selection,
+        },
+    );
+    if let OperatorData::Scan(scan) = operator.get(ctx) {
+        for column in &scan.columns {
+            if let Some(column_profile) = profile.columns.get(column) {
+                session.append(
+                    scope_id,
+                    ObservationPayload::ScanNdv {
+                        operator,
+                        column: ctx.column(*column).name.clone(),
+                        value: column_profile.distinct.value,
+                        source: column_profile.distinct.source,
+                        cap: column_profile.frequency.value,
+                    },
+                );
+            }
+        }
     }
 }
 
@@ -1653,17 +1859,31 @@ fn cardinality_profile(
     }
 }
 
+#[cfg(test)]
+fn scan_statistic_selection_reason(
+    catalog_ndv: Option<usize>,
+    hll_ndv: Option<f64>,
+    has_sketches: bool,
+) -> &'static str {
+    match (hll_ndv, catalog_ndv, has_sketches) {
+        (Some(_), _, _) => "hll_selected",
+        (None, Some(_), _) => "catalog_selected",
+        (None, None, true) => "default",
+        (None, None, false) => "no_sketch",
+    }
+}
+
 fn scan_profile(
     scan: &Scan,
     ctx: &QueryContext,
     analyses: &AnalysisContext,
     config: &CardinalityEstimationConfig,
 ) -> AnalysisResult<CardinalityProfile> {
-    let catalog_stats = analyses
+    let table_metadata = analyses
         .catalog
         .table_by_ref(&scan.table)
-        .map_err(|error| AnalysisError::Catalog(error.to_string()))?
-        .statistics;
+        .map_err(|error| AnalysisError::Catalog(error.to_string()))?;
+    let catalog_stats = table_metadata.statistics;
 
     let row_estimate = catalog_stats
         .as_ref()
@@ -1689,50 +1909,10 @@ fn scan_profile(
             .unwrap_or_else(|| {
                 default_scan_column_profile(&row_estimate, config, sketches.clone())
             });
-        log_scan_sketch_decision(
-            &scan.table,
-            column_name,
-            catalog_column,
-            sketches.as_deref(),
-            &profile,
-        );
         columns.insert(*column, profile);
     }
 
     Ok(CardinalityProfile::new(row_estimate, columns))
-}
-
-/// Emits sketch-estimator decisions when `OPTD_SKETCH_OBSERVABILITY=1` is set.
-///
-/// This uses stderr rather than a logging facade because `optd-core` intentionally has no runtime
-/// logging dependency. Values are terse, key-value fields so regression-harness output can be
-/// filtered without enabling logs during normal planning.
-fn sketch_observability_enabled() -> bool {
-    sketch_observability_enabled_from(std::env::var("OPTD_SKETCH_OBSERVABILITY").ok().as_deref())
-}
-
-fn sketch_observability_enabled_from(value: Option<&str>) -> bool {
-    matches!(value, Some("1" | "true" | "TRUE" | "yes" | "YES"))
-}
-
-fn log_scan_sketch_decision(
-    table: &TableRef,
-    column: &str,
-    catalog: Option<&ColumnStatistics>,
-    sketches: Option<&ColumnSketches>,
-    profile: &ColumnProfile,
-) {
-    if !sketch_observability_enabled() || sketches.is_none() {
-        return;
-    }
-    let catalog_ndv = catalog.and_then(|stats| stats.distinct);
-    let hll_ndv = sketches
-        .and_then(|sketches| sketches.distinct_values.as_ref())
-        .map(|hll| hll.estimate());
-    eprintln!(
-        "sketch_observability event=scan_ndv table={table:?} column={column:?} catalog_ndv={catalog_ndv:?} hll_ndv={hll_ndv:?} selected_ndv={} selected_source={:?}",
-        profile.distinct.value, profile.distinct.source,
-    );
 }
 
 fn column_profile_from_stats(
@@ -2002,47 +2182,11 @@ fn apply_selection_profile(
         } else {
             filter_selectivity(&profile, conjunct, ctx, config).value
         };
-        log_filter_sketch_decision(&profile, conjunct, ctx, selectivity);
         let value_restriction = value_restricted_filter_column(conjunct, ctx);
         profile = scale_profile(profile, selectivity, value_restriction);
         tighten_filter_columns(&mut profile, conjunct, ctx);
     }
     profile
-}
-
-fn log_filter_sketch_decision(
-    profile: &CardinalityProfile,
-    predicate: Expr,
-    ctx: &QueryContext,
-    selectivity: f64,
-) {
-    if !sketch_observability_enabled() {
-        return;
-    }
-    let ExprData::Binary { op, left, right } = predicate.get(ctx) else {
-        return;
-    };
-    let Some((column, literal, _)) = column_literal(*op, *left, *right, ctx) else {
-        return;
-    };
-    let Some(column_profile) = profile.columns.get(&column) else {
-        return;
-    };
-    let Some(sketches) = column_profile.sketches.as_ref() else {
-        return;
-    };
-    let Some(frequent_values) = sketches.frequent_values.as_ref() else {
-        return;
-    };
-    let decision = EncodedScalarValue::from_scalar(literal)
-        .map(|value| frequent_values.estimate(&value).is_some())
-        .map(|tracked| if tracked { "override" } else { "fallback" })
-        .unwrap_or("fallback");
-    let column_data = ctx.column(column);
-    eprintln!(
-        "sketch_observability event=filter_spacesaving table={:?} column={:?} literal={literal:?} decision={decision} selectivity={selectivity} population_rows={}",
-        column_data.qualifier, column_data.name, sketches.population_rows,
-    );
 }
 
 fn scale_profile(
@@ -2749,34 +2893,18 @@ fn join_selectivity_from_conjuncts_with_config(
 
     let selectivity = (equality_selectivity * residual_selectivity).clamp(0.0, 1.0);
     let first_moment_upper = (right.rows.value * selectivity).clamp(0.0, 1.0);
-    let (match_probability, conditional_fanout, match_probability_mode) =
-        if has_cross_input_equality {
-            let conditional_fanout = residual_conditional_fanout(
-                equality_match_probability,
-                equality_selectivity,
-                right.rows.value,
-            );
-            (
-                residual_match_probability(
-                    equality_match_probability,
-                    equality_selectivity,
-                    right.rows.value,
-                    residual_selectivity,
-                ),
-                conditional_fanout,
-                "residual_survival",
-            )
-        } else {
-            // With no equality-domain coverage information, retain the first-moment heuristic. It is
-            // an upper bound when pair selectivity is exact, not a calibrated existence probability.
-            (first_moment_upper, 0.0, "first_moment_upper")
-        };
-    if sketch_observability_enabled() {
-        eprintln!(
-            "sketch_observability event=join_match_probability mode={match_probability_mode} equality_match_probability={equality_match_probability} equality_pair_selectivity={equality_selectivity} right_rows={} conditional_fanout={conditional_fanout} residual_selectivity={residual_selectivity} resulting_match_probability={match_probability}",
+    let match_probability = if has_cross_input_equality {
+        residual_match_probability(
+            equality_match_probability,
+            equality_selectivity,
             right.rows.value,
-        );
-    }
+            residual_selectivity,
+        )
+    } else {
+        // With no equality-domain coverage information, retain the first-moment heuristic. It is
+        // an upper bound when pair selectivity is exact, not a calibrated existence probability.
+        first_moment_upper
+    };
     #[cfg(test)]
     let equivalence_state_columns = classes.tracked_column_count();
     JoinSelectivityEstimate {
@@ -2856,7 +2984,7 @@ fn equality_edge_estimate(
     left: &CardinalityProfile,
     right: &CardinalityProfile,
     catalog: Option<&dyn Catalog>,
-    ctx: &QueryContext,
+    _ctx: &QueryContext,
 ) -> EqualityEdgeEstimate {
     let first = edge.left;
     let second = edge.right;
@@ -2956,26 +3084,6 @@ fn equality_edge_estimate(
     let sketch_selectivity = (!null_safe)
         .then(|| sketch_join_estimate(first, second, left, right))
         .flatten();
-    if sketch_observability_enabled() {
-        let left_column_data = ctx.column(left_column);
-        let right_column_data = ctx.column(right_column);
-        let decision = if null_safe {
-            "fallback_null_safe"
-        } else if sketch_selectivity.is_some() {
-            "override"
-        } else {
-            "fallback"
-        };
-        eprintln!(
-            "sketch_observability event=join_spacesaving left_table={:?} left_column={:?} right_table={:?} right_column={:?} left_ndv={left_distinct} right_ndv={right_distinct} intersection_ndv={} decision={decision} pair_selectivity={}",
-            left_column_data.qualifier,
-            left_column_data.name,
-            right_column_data.qualifier,
-            right_column_data.name,
-            intersection.distinct,
-            sketch_selectivity.unwrap_or(equal_non_null),
-        );
-    }
     let uniform_pair_selectivity = if null_safe {
         equal_non_null + null_pair_selectivity
     } else {
@@ -4582,12 +4690,20 @@ mod tests {
     use std::sync::Arc;
 
     #[test]
-    fn sketch_observability_is_explicitly_opt_in() {
-        assert!(!sketch_observability_enabled_from(None));
-        assert!(!sketch_observability_enabled_from(Some("0")));
-        assert!(!sketch_observability_enabled_from(Some("debug")));
-        assert!(sketch_observability_enabled_from(Some("1")));
-        assert!(sketch_observability_enabled_from(Some("true")));
+    fn scan_statistic_selection_reason_reports_the_baseline_fallback() {
+        assert_eq!(
+            scan_statistic_selection_reason(Some(10), Some(12.0), true),
+            "hll_selected"
+        );
+        assert_eq!(
+            scan_statistic_selection_reason(Some(10), None, false),
+            "catalog_selected"
+        );
+        assert_eq!(scan_statistic_selection_reason(None, None, true), "default");
+        assert_eq!(
+            scan_statistic_selection_reason(None, None, false),
+            "no_sketch"
+        );
     }
 
     #[test]
@@ -8318,5 +8434,79 @@ mod tests {
             value: None,
             sketches: None,
         }
+    }
+
+    #[test]
+    fn observation_modes_preserve_estimates_and_finalize_the_selected_dag() {
+        let mut ctx = QueryContext::new();
+        let scan = OperatorData::ConstScan(crate::ConstScan {
+            columns: vec![],
+            rows: vec![vec![]],
+        })
+        .add(&mut ctx);
+        let root = OperatorData::Output(crate::Output { input: scan }).add(&mut ctx);
+
+        let mut off = crate::test_analyses(&ctx);
+        let expected = off.get::<CardinalityEstimationV1>(&ctx, root).unwrap();
+        let session = ObservationSession::new(ObservationMode::LastPlanSummary);
+        let mut observed = crate::test_analyses(&ctx);
+        observed.observe_with(session.clone());
+        assert_eq!(
+            observed.get::<CardinalityEstimationV1>(&ctx, root).unwrap(),
+            expected
+        );
+        observed.finalize_observations(&ctx, root).unwrap();
+        let records = session.records();
+        let summaries = records
+            .iter()
+            .filter(|record| matches!(record.payload, ObservationPayload::OperatorSummary { .. }))
+            .count();
+        assert_eq!(summaries, 2);
+        assert!(records.iter().any(|record| matches!(
+            record.payload,
+            ObservationPayload::OperatorSummary { operator, rows, .. }
+                if operator == root && rows == expected.rows.value
+        )));
+
+        let detailed = ObservationSession::new(ObservationMode::DetailedSummary);
+        let mut detailed_analyses = crate::test_analyses(&ctx);
+        detailed_analyses.observe_with(detailed.clone());
+        assert_eq!(
+            detailed_analyses
+                .get::<CardinalityEstimationV1>(&ctx, root)
+                .unwrap(),
+            expected
+        );
+        let _ = detailed_analyses
+            .get::<CardinalityEstimationV1>(&ctx, root)
+            .unwrap();
+        detailed_analyses.finalize_observations(&ctx, root).unwrap();
+        assert!(detailed.records().iter().any(|record| matches!(
+            record.payload,
+            ObservationPayload::CacheReuse { operator } if operator == root
+        )));
+        assert!(detailed.records().iter().any(|record| matches!(
+            record.payload,
+            ObservationPayload::SelectedRoot { operator } if operator == root
+        )));
+    }
+
+    #[test]
+    fn observation_forks_share_a_session_and_advance_generations() {
+        let ctx = QueryContext::new();
+        let session = ObservationSession::new(ObservationMode::DetailedSummary);
+        let mut analyses = crate::test_analyses(&ctx);
+        analyses.observe_with(session.clone());
+        let fork = analyses.fork();
+        assert_eq!(
+            fork.observation_session().unwrap().metadata().session_id,
+            session.metadata().session_id
+        );
+        analyses.clear();
+        let left = analyses.observation_context().unwrap().1;
+        let right = fork.observation_context().unwrap().1;
+        assert_ne!(left.id, right.id);
+        assert_eq!(left.generation, 1);
+        assert_eq!(right.generation, 0);
     }
 }

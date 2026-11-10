@@ -2845,6 +2845,7 @@ dependencies = [
  "anstyle",
  "arrow-schema",
  "fixedbitset",
+ "log",
  "optd-sketches",
  "serde",
  "serde_json",
