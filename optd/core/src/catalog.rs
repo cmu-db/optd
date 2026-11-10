@@ -6,6 +6,7 @@ use std::sync::{Arc, RwLock};
 
 pub use arrow_schema::{Schema, SchemaRef};
 
+use optd_sampling::TableSample;
 use optd_sketches::HyperLogLog;
 
 use crate::{ColumnSketches, ScalarValue, TUPLE_VALUE_ENCODING_VERSION};
@@ -1109,6 +1110,8 @@ pub struct TableMetadata {
     pub table: ResolvedTableRef,
     pub schema: SchemaRef,
     pub statistics: Option<TableStatistics>,
+    /// Optional reservoir sample rows for sample-based cardinality estimation.
+    pub samples: Option<TableSample>,
     pub definition: Option<String>,
 }
 
@@ -1130,6 +1133,7 @@ pub enum CatalogError {
         id: TableId,
     },
     InvalidStatistics(String),
+    InvalidSamples(String),
 }
 
 impl fmt::Display for CatalogError {
@@ -1148,6 +1152,7 @@ impl fmt::Display for CatalogError {
                 write!(f, "table '{table}' points to missing table id {}", id.0)
             }
             Self::InvalidStatistics(error) => write!(f, "invalid table statistics: {error}"),
+            Self::InvalidSamples(error) => write!(f, "invalid table samples: {error}"),
         }
     }
 }
@@ -1186,6 +1191,17 @@ pub trait Catalog: Send + Sync + 'static {
         table: TableRef,
         statistics: TableStatistics,
     ) -> CatalogResult<()>;
+
+    /// Returns stored sample rows for a table, when present.
+    fn table_samples(&self, table: &TableRef) -> CatalogResult<Option<TableSample>> {
+        Ok(self.table_by_ref(table)?.samples)
+    }
+
+    /// Replaces stored sample rows for a table.
+    ///
+    /// The sample schema must match the catalog table schema. Callers typically install past
+    /// reservoirs collected offline or in a prior run; current-run collection is left open.
+    fn set_table_samples(&self, table: TableRef, samples: TableSample) -> CatalogResult<()>;
 }
 
 /// Deterministic in-memory catalog implementation useful for tests and local planning.
@@ -1254,6 +1270,7 @@ impl Catalog for MemoryCatalog {
                 table,
                 schema,
                 statistics: None,
+                samples: None,
                 definition,
             },
         );
@@ -1327,6 +1344,29 @@ impl Catalog for MemoryCatalog {
         validate_table_statistics(&statistics, metadata.schema.fields().len())
             .map_err(CatalogError::InvalidStatistics)?;
         metadata.statistics = Some(statistics);
+        Ok(())
+    }
+
+    fn set_table_samples(&self, table: TableRef, samples: TableSample) -> CatalogResult<()> {
+        let mut inner = self.inner.write().expect("memory catalog lock poisoned");
+        let resolved = self.resolve_table_ref(table.clone());
+        let Some(id) = inner.table_to_id.get(&resolved).copied() else {
+            return Err(CatalogError::TableNotFound { table });
+        };
+
+        let metadata = inner
+            .tables
+            .get_mut(&id)
+            .ok_or(CatalogError::DanglingTableReference {
+                table: resolved,
+                id,
+            })?;
+        if samples.schema.as_ref() != metadata.schema.as_ref() {
+            return Err(CatalogError::InvalidSamples(
+                "sample schema does not match table schema".into(),
+            ));
+        }
+        metadata.samples = Some(samples);
         Ok(())
     }
 }
@@ -1413,6 +1453,93 @@ mod tests {
         assert!(matches!(
             catalog.table_by_ref(&TableRef::bare("users")),
             Err(CatalogError::TableNotFound { .. })
+        ));
+    }
+
+    #[test]
+    fn memory_catalog_stores_and_returns_table_samples() {
+        use arrow_array::{Int64Array, RecordBatch, StringArray};
+        use optd_sampling::SampleProvenance;
+        use rand::{SeedableRng, rngs::StdRng};
+
+        let catalog = MemoryCatalog::new("memory", "public");
+        let schema = schema();
+        catalog
+            .create_table(TableRef::bare("users"), schema.clone(), None)
+            .unwrap();
+
+        assert_eq!(
+            catalog.table_samples(&TableRef::bare("users")).unwrap(),
+            None
+        );
+
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(Int64Array::from(vec![1_i64, 2, 3, 4, 5])),
+                Arc::new(StringArray::from(vec![
+                    Some("a"),
+                    Some("b"),
+                    Some("c"),
+                    Some("d"),
+                    Some("e"),
+                ])),
+            ],
+        )
+        .unwrap();
+        let mut rng = StdRng::seed_from_u64(42);
+        let samples = optd_sampling::reservoir_sample(
+            [batch],
+            3,
+            SampleProvenance::Past,
+            Some(100),
+            &mut rng,
+        )
+        .unwrap();
+        assert_eq!(samples.num_rows(), 3);
+
+        catalog
+            .set_table_samples(TableRef::bare("users"), samples.clone())
+            .unwrap();
+
+        let loaded = catalog
+            .table_samples(&TableRef::bare("users"))
+            .unwrap()
+            .expect("samples installed");
+        assert_eq!(loaded, samples);
+        assert_eq!(loaded.block_size, 3);
+        assert_eq!(loaded.source_rows, 100);
+        assert_eq!(
+            catalog
+                .table_by_ref(&TableRef::bare("users"))
+                .unwrap()
+                .samples,
+            Some(samples)
+        );
+    }
+
+    #[test]
+    fn memory_catalog_rejects_sample_schema_mismatch() {
+        use arrow_array::{Int64Array, RecordBatch};
+        use optd_sampling::{SampleProvenance, TableSample};
+
+        let catalog = MemoryCatalog::new("memory", "public");
+        catalog
+            .create_table(TableRef::bare("users"), schema(), None)
+            .unwrap();
+
+        let other_schema = Arc::new(Schema::new(vec![Field::new("x", DataType::Int64, true)]));
+        let batch = RecordBatch::try_new(
+            other_schema.clone(),
+            vec![Arc::new(Int64Array::from(vec![1_i64]))],
+        )
+        .unwrap();
+        let samples =
+            TableSample::try_new(other_schema, vec![batch], 1, 1, SampleProvenance::Past).unwrap();
+
+        assert!(matches!(
+            catalog.set_table_samples(TableRef::bare("users"), samples),
+            Err(CatalogError::InvalidSamples(_))
         ));
     }
 

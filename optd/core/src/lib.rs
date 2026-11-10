@@ -42,6 +42,10 @@ pub use hypergraph::{
     Hyperedge, HyperedgeJoinType, HypergraphNode, HypergraphOf, JoinGroupOf, NodeId, NodeSet,
     QueryHypergraph, build_hypergraph, nodeset_iter, nodeset_min, nodeset_singleton,
 };
+pub use optd_sampling::{
+    ReservoirSampler, SampleError, SampleProvenance, TableSample, reservoir_sample,
+    table_sample_from_batches,
+};
 pub use optimize::{
     Direction, ExprSimplify, HolisticUnnesting, JoinOrdering, JoinTreeNormalize,
     MarkJoinToSemiJoin, OperatorRewrite, OperatorRewriteAdaptor, OptimizeError, OptimizeResult,

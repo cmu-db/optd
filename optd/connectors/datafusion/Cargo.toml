@@ -5,7 +5,9 @@ edition = "2024"
 
 [dependencies]
 optd-core = { path = "../../core" }
+optd-sampling = { path = "../../sampling" }
 optd-sketches = { path = "../../sketches" }
+rand = { version = "0.9", default-features = false, features = ["std", "std_rng"] }
 datafusion = "=53.1.0"
 datafusion-catalog = "=53.1.0"
 datafusion-common = "=53.1.0"

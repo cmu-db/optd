@@ -17,6 +17,7 @@ that apply to the work at hand.
 
 - `optd/core/`: `optd-core`, including IR handles and payloads, analyses, catalog, display, Substrait conversion, and optimizer passes.
 - `optd/connectors/datafusion/`: DataFusion import/export, physical planning, runtime statistics, and SQLLogicTest coverage.
+- `optd/sampling/`: table sample types and reservoir sampling used by catalog-backed sample estimation.
 - `docs/`: durable architecture, development, debugging, and investigation notes.
 - `.agents/skills/`: optional Codex skills. Add one only for a specialized recurring workflow that benefits from its own instructions, references, or scripts.
 

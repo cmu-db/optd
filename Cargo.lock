@@ -2843,10 +2843,13 @@ name = "optd-core"
 version = "0.1.0"
 dependencies = [
  "anstyle",
+ "arrow-array",
  "arrow-schema",
  "fixedbitset",
  "log",
+ "optd-sampling",
  "optd-sketches",
+ "rand 0.9.4",
  "serde",
  "serde_json",
  "substrait 0.63.0",
@@ -2868,12 +2871,24 @@ dependencies = [
  "duckdb",
  "futures",
  "optd-core",
+ "optd-sampling",
  "optd-sketches",
+ "rand 0.9.4",
  "rustyline",
  "serde",
  "serde_json",
  "sqllogictest",
  "tokio",
+]
+
+[[package]]
+name = "optd-sampling"
+version = "0.1.0"
+dependencies = [
+ "arrow-array",
+ "arrow-schema",
+ "arrow-select",
+ "rand 0.9.4",
 ]
 
 [[package]]

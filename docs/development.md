@@ -12,6 +12,7 @@ The workspace uses Rust 2024 with the pinned toolchain in `rust-toolchain.toml`.
 - `optd/core/examples/basic.rs` builds and displays sample plans.
 - `optd/core/examples/rename.rs` demonstrates the rename operator.
 - `optd/connectors/datafusion/` is package `optd-datafusion`. It contains the DataFusion bridge, direct physical planner, runtime statistics, profiling tools, and SQLLogicTest harness.
+- `optd/sampling/` is package `optd-sampling` (table sample types and reservoir sampling for cardinality estimation).
 - `optd/crates/` is reserved for future authored support crates.
 - `docs/` holds durable architecture, development, debugging, and investigation material.
 - `.agents/skills/` is reserved for specialized agent workflows that justify a discoverable skill package; ordinary project documentation belongs in `docs/`.

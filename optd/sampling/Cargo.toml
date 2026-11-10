@@ -1,0 +1,11 @@
+[package]
+name = "optd-sampling"
+version = "0.1.0"
+edition = "2024"
+description = "Table sample types and reservoir sampling for cardinality estimation"
+
+[dependencies]
+arrow-array = "58.3.0"
+arrow-schema = "58.3.0"
+arrow-select = "58.3.0"
+rand = { version = "0.9", default-features = false, features = ["std", "std_rng"] }
