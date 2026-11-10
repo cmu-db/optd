@@ -4268,8 +4268,6 @@ struct EqualityEdge {
 
 struct CompositeJoinEstimate {
     covered_edges: BTreeSet<(Column, Column)>,
-    selected_joint: JointNdv,
-    effective_ndv: f64,
     uses_unique_constraint: bool,
     pair_selectivity: f64,
     left_match_probability: f64,
@@ -4457,8 +4455,6 @@ fn composite_join_estimate(
                         .iter()
                         .map(|(_, _, left, right)| (*left, *right))
                         .collect(),
-                    selected_joint: joint.clone(),
-                    effective_ndv: joint_distinct,
                     uses_unique_constraint: joint_unique_distinct.is_some()
                         || other_unique_distinct.is_some(),
                     pair_selectivity: pair_selectivity.clamp(0.0, 1.0),
