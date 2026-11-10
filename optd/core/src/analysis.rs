@@ -5,10 +5,13 @@ use std::fmt;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use arrow_schema::SchemaRef;
+
 use crate::{
-    AggregateExpr, AggregateFunction, BinaryOp, Catalog, Column, ColumnSketches, ColumnStatistics,
-    EncodedScalarValue, Expr, ExprData, JoinType, NaryOp, NodeSet, Operator, OperatorData,
-    QueryContext, QueryHypergraph, Relation, ScalarValue, Scan, TableId, TableRef, UnaryOp,
+    AggregateExpr, AggregateFunction, BinaryOp, Catalog, Column, ColumnGroupSource, ColumnSketches,
+    ColumnStatistics, EncodedScalarValue, Expr, ExprData, JoinType, NaryOp, NodeSet, Operator,
+    OperatorData, QueryContext, QueryHypergraph, Relation, ScalarValue, Scan, TableId, TableRef,
+    UnaryOp,
 };
 
 mod logical_facts;
@@ -351,11 +354,24 @@ impl ColumnProfile {
 pub struct CardinalityProfile {
     pub rows: Estimate,
     pub columns: BTreeMap<Column, ColumnProfile>,
+    /// Base-population joint distinct estimates, retained only while their rows are unchanged.
+    pub joint_ndvs: Vec<JointNdv>,
     /// Nontrivial equality classes whose columns all occur in [`Self::columns`].
     ///
     /// Singleton classes are intentionally omitted: a single column's NDV is already stored in
     /// its [`ColumnProfile`]. Every stored class therefore contains at least two columns.
     pub equivalence_classes: Vec<ColumnEquivalenceClass>,
+}
+
+/// An immutable joint distinct estimate for a base-table column set.
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, PartialEq)]
+pub struct JointNdv {
+    pub values: BTreeSet<ValueId>,
+    pub distinct: Estimate,
+    pub population_rows: f64,
+    pub non_null_rows: f64,
+    pub source: ColumnGroupSource,
 }
 
 /// Columns known equal in a derived profile, with the best known class NDV.
@@ -388,6 +404,7 @@ impl CardinalityProfile {
         Self {
             rows,
             columns,
+            joint_ndvs: Vec::new(),
             equivalence_classes: Vec::new(),
         }
     }
@@ -402,6 +419,7 @@ impl CardinalityProfile {
         let equivalence_classes = filter_equivalence_classes(&self.equivalence_classes, &columns);
         Self {
             rows,
+            joint_ndvs: Vec::new(),
             columns,
             equivalence_classes,
         }
@@ -1836,6 +1854,7 @@ fn cardinality_profile(
                 data,
                 ctx,
                 &config,
+                Some(catalog.as_ref()),
             )))
         }
         OperatorData::CrossProduct(data) => {
@@ -1865,9 +1884,9 @@ fn scan_statistic_selection_reason(
     hll_ndv: Option<f64>,
     has_sketches: bool,
 ) -> &'static str {
-    match (hll_ndv, catalog_ndv, has_sketches) {
-        (Some(_), _, _) => "hll_selected",
-        (None, Some(_), _) => "catalog_selected",
+    match (catalog_ndv, hll_ndv, has_sketches) {
+        (Some(_), _, _) => "catalog_selected",
+        (None, Some(_), _) => "hll_selected",
         (None, None, true) => "default",
         (None, None, false) => "no_sketch",
     }
@@ -1904,15 +1923,26 @@ fn scan_profile(
             Some(sketches) => Some(sketches),
             None => analyses.column_sketches(&scan.table, column_name)?,
         };
-        let profile = catalog_column
+        let mut profile = catalog_column
             .map(|stats| column_profile_from_stats(stats, &row_estimate, sketches.clone()))
             .unwrap_or_else(|| {
                 default_scan_column_profile(&row_estimate, config, sketches.clone())
             });
+        profile.value = Some(ValueId::Base(BaseColumn {
+            table: scan.table.clone(),
+            name: column_name.clone(),
+            source: *column,
+        }));
         columns.insert(*column, profile);
     }
 
-    Ok(CardinalityProfile::new(row_estimate, columns))
+    let joint_ndvs = catalog_stats
+        .as_ref()
+        .map(|stats| scan_joint_ndvs(stats, &table_metadata.schema, row_estimate.value, scan, ctx))
+        .unwrap_or_default();
+    let mut profile = CardinalityProfile::new(row_estimate, columns);
+    profile.joint_ndvs = joint_ndvs;
+    Ok(profile)
 }
 
 fn column_profile_from_stats(
@@ -1928,14 +1958,14 @@ fn column_profile_from_stats(
         .as_ref()
         .and_then(|sketches| sketches.distinct_values.as_ref())
         .map(|hll| hll.estimate().min(frequency.value));
-    let distinct = match (sketch_distinct, stats.distinct) {
-        (Some(value), _) => Estimate {
+    let distinct = match (stats.distinct, sketch_distinct) {
+        (Some(value), _) => Estimate::catalog((value as f64).min(frequency.value)),
+        (None, Some(value)) => Estimate {
             value,
             lower: Some(0.0),
             upper: Some(frequency.value),
             source: EstimateSource::Sketch,
         },
-        (None, Some(value)) => Estimate::catalog((value as f64).min(frequency.value)),
         (None, None) => Estimate::default(frequency.value.min(rows.value)),
     };
     ColumnProfile {
@@ -1971,6 +2001,88 @@ fn default_scan_column_profile(
         value: None,
         sketches,
     }
+}
+
+fn scan_joint_ndvs(
+    statistics: &crate::TableStatistics,
+    schema: &SchemaRef,
+    scan_rows: f64,
+    scan: &Scan,
+    ctx: &QueryContext,
+) -> Vec<JointNdv> {
+    let scan_columns = scan
+        .columns
+        .iter()
+        .map(|column| (ctx.column(*column).name.as_str(), *column))
+        .collect::<BTreeMap<_, _>>();
+    statistics
+        .column_groups
+        .iter()
+        .filter_map(|group| {
+            if group.columns.columns().len() < 2
+                || group
+                    .columns
+                    .columns()
+                    .iter()
+                    .any(|ordinal| *ordinal >= schema.fields().len())
+                || group.cardinality.validate().is_err()
+                || group.cardinality.population_rows as f64 != scan_rows
+            {
+                return None;
+            }
+            let values = group
+                .columns
+                .columns()
+                .iter()
+                .map(|ordinal| {
+                    let name = schema.fields().get(*ordinal)?.name();
+                    scan_columns.get(name.as_str()).map(|column| {
+                        ValueId::Base(BaseColumn {
+                            table: scan.table.clone(),
+                            name: name.clone(),
+                            source: *column,
+                        })
+                    })
+                })
+                .collect::<Option<BTreeSet<_>>>()?;
+            let (distinct, source) = match group.cardinality.distinct {
+                Some(distinct) => (distinct as f64, EstimateSource::Catalog),
+                None => (
+                    group.cardinality.distinct_values.as_ref()?.estimate(),
+                    EstimateSource::Sketch,
+                ),
+            };
+            let distinct = distinct.min(group.cardinality.non_null_rows as f64);
+            Some(JointNdv {
+                values,
+                distinct: Estimate {
+                    value: distinct,
+                    lower: Some(0.0),
+                    upper: Some(group.cardinality.non_null_rows as f64),
+                    source,
+                },
+                population_rows: group.cardinality.population_rows as f64,
+                non_null_rows: group.cardinality.non_null_rows as f64,
+                source: group.source,
+            })
+        })
+        .collect()
+}
+
+fn retained_joint_ndvs(
+    input: &CardinalityProfile,
+    columns: &BTreeMap<Column, ColumnProfile>,
+) -> Vec<JointNdv> {
+    let values = columns
+        .values()
+        .filter_map(|profile| profile.value.clone())
+        .collect::<BTreeSet<_>>();
+    input
+        .joint_ndvs
+        .iter()
+        .filter(|joint| joint.values.is_subset(&values))
+        .cloned()
+        .collect()
 }
 
 fn const_scan_profile(data: &crate::ConstScan, ctx: &QueryContext) -> CardinalityProfile {
@@ -2016,6 +2128,7 @@ fn project_profile(input: &CardinalityProfile, columns: &[Column]) -> Cardinalit
     let equivalence_classes = filter_equivalence_classes(&input.equivalence_classes, &columns);
     CardinalityProfile {
         rows: input.rows.clone(),
+        joint_ndvs: retained_joint_ndvs(input, &columns),
         columns,
         equivalence_classes,
     }
@@ -2038,6 +2151,7 @@ fn rename_profile(input: &CardinalityProfile, defs: &[(Column, Column)]) -> Card
         .collect();
     CardinalityProfile {
         rows: input.rows.clone(),
+        joint_ndvs: retained_joint_ndvs(input, &columns),
         columns,
         equivalence_classes: rename_equivalence_classes(&input.equivalence_classes, &rename_map),
     }
@@ -2056,6 +2170,14 @@ fn map_profile(
         });
         output.columns.insert(*column, profile);
     }
+    output.joint_ndvs = if computations
+        .iter()
+        .all(|(_, expr)| matches!(expr.get(ctx), ExprData::ColumnRef(_)))
+    {
+        retained_joint_ndvs(input, &output.columns)
+    } else {
+        Vec::new()
+    };
     output
 }
 
@@ -2078,29 +2200,59 @@ fn aggregation_profile(
     data: &crate::Aggregation,
     ctx: &QueryContext,
     config: &CardinalityEstimationConfig,
+    catalog: Option<&dyn Catalog>,
 ) -> CardinalityProfile {
     let group_rows = if data.keys.is_empty() {
         // SQL scalar aggregation emits exactly one row even for an empty input.
         Estimate::exact(1.0)
     } else {
-        // TODO(statistics): Once sampling is available, use sampled multi-column NDV for
-        // non-equivalent grouping keys instead of multiplying independent single-column NDVs.
         let mut seen_values = BTreeSet::new();
-        let product = data.keys.iter().fold(1.0, |acc, expr| {
-            if let ExprData::ColumnRef(column) = expr.get(ctx) {
-                if let Some(value) = input_facts.canonical_value_for_column(*column)
-                    && !seen_values.insert(value)
-                {
-                    return acc;
-                }
-                acc * input.columns.get(column).map_or(
-                    input.rows.value.min(config.unknown_column_ndv_cap),
-                    |profile| profile.distinct.value,
-                )
+        let grouping_values = data
+            .keys
+            .iter()
+            .filter_map(|expr| match expr.get(ctx) {
+                ExprData::ColumnRef(column) => input_facts.canonical_value_for_column(*column),
+                _ => None,
+            })
+            .filter(|value| seen_values.insert(value.clone()))
+            .collect::<BTreeSet<_>>();
+        let unique_grouping = grouping_has_unique_key(&grouping_values, input, catalog);
+        let selected_joint = (!unique_grouping)
+            .then(|| {
+                input
+                    .joint_ndvs
+                    .iter()
+                    .filter(|joint| joint.values.is_subset(&grouping_values))
+                    .max_by_key(|joint| joint.values.len())
+            })
+            .flatten();
+        let covered_values = selected_joint
+            .map(|joint| joint.values.clone())
+            .unwrap_or_default();
+        let product = data.keys.iter().fold(
+            if unique_grouping {
+                input.rows.value
             } else {
-                acc * input.rows.value.min(config.unknown_column_ndv_cap)
-            }
-        });
+                selected_joint.map_or(1.0, |joint| joint.distinct.value)
+            },
+            |acc, expr| {
+                if let ExprData::ColumnRef(column) = expr.get(ctx) {
+                    if let Some(value) = input_facts.canonical_value_for_column(*column) {
+                        if covered_values.contains(&value) || !seen_values.contains(&value) {
+                            return acc;
+                        }
+                        // Mark this value consumed after the optional joint group has covered it.
+                        seen_values.remove(&value);
+                    }
+                    acc * input.columns.get(column).map_or(
+                        input.rows.value.min(config.unknown_column_ndv_cap),
+                        |profile| profile.distinct.value,
+                    )
+                } else {
+                    acc * input.rows.value.min(config.unknown_column_ndv_cap)
+                }
+            },
+        );
         Estimate::derived(product.min(input.rows.value), Some(0.0), input.rows.upper)
             .cap(input.rows.value, EstimateSource::Derived)
     };
@@ -2161,6 +2313,42 @@ fn aggregation_profile(
         columns.insert(*column, profile);
     }
     CardinalityProfile::new(group_rows, columns)
+}
+
+fn grouping_has_unique_key(
+    grouping_values: &BTreeSet<ValueId>,
+    input: &CardinalityProfile,
+    catalog: Option<&dyn Catalog>,
+) -> bool {
+    let Some(catalog) = catalog else { return false };
+    let bases = grouping_values
+        .iter()
+        .filter_map(|value| match value {
+            ValueId::Base(base) => Some(base),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let Some(base) = bases.first() else {
+        return false;
+    };
+    if bases.iter().any(|candidate| candidate.table != base.table)
+        || !profile_has_complete_base_population(input, base, catalog)
+    {
+        return false;
+    }
+    catalog
+        .table_by_ref(&base.table)
+        .ok()
+        .and_then(|metadata| metadata.statistics)
+        .is_some_and(|statistics| {
+            statistics.constraints.unique_keys.iter().any(|key| {
+                key.columns().iter().all(|name| {
+                    grouping_values.iter().any(|value| {
+                        matches!(value, ValueId::Base(candidate) if candidate.table == base.table && candidate.name == *name)
+                    })
+                })
+            })
+        })
 }
 
 fn apply_selection_profile(
@@ -2251,6 +2439,7 @@ fn scale_profile(
     let equivalence_classes = filter_equivalence_classes(&profile.equivalence_classes, &columns);
     CardinalityProfile {
         rows,
+        joint_ndvs: Vec::new(),
         columns,
         equivalence_classes,
     }
@@ -2319,6 +2508,7 @@ pub(crate) fn cross_product_profile(
     }
     CardinalityProfile {
         rows,
+        joint_ndvs: Vec::new(),
         columns,
         equivalence_classes: merge_equivalence_class_lists(
             &left.equivalence_classes,
@@ -2407,8 +2597,15 @@ fn join_profile_from_conjuncts_with_config(
         )),
         "join_profile_from_conjuncts requires atomic conjuncts"
     );
-    let estimate =
-        join_selectivity_from_conjuncts_with_config(left, right, conjuncts, ctx, config, catalog);
+    let estimate = join_selectivity_from_conjuncts_with_config(
+        left,
+        right,
+        conjuncts,
+        matches!(join_type, JoinType::Inner),
+        ctx,
+        config,
+        catalog,
+    );
     join_profile_with_selectivity_and_classes(left, right, join_type, estimate)
 }
 
@@ -2545,6 +2742,7 @@ fn single_join_profile(
     }
     CardinalityProfile {
         rows: left.rows.clone(),
+        joint_ndvs: Vec::new(),
         columns,
         equivalence_classes: left.equivalence_classes.clone(),
     }
@@ -2671,6 +2869,7 @@ fn combine_join_columns(
     let equivalence_classes = filter_owned_equivalence_classes(equivalence_classes, &columns);
     let mut output = CardinalityProfile {
         rows,
+        joint_ndvs: Vec::new(),
         columns,
         equivalence_classes,
     };
@@ -2737,6 +2936,7 @@ fn join_selectivity(
         left,
         right,
         conjuncts,
+        true,
         ctx,
         &CardinalityEstimationConfig::default(),
         None,
@@ -2770,6 +2970,7 @@ fn join_selectivity_from_conjuncts(
         left,
         right,
         conjuncts,
+        true,
         ctx,
         &CardinalityEstimationConfig::default(),
         None,
@@ -2780,6 +2981,7 @@ fn join_selectivity_from_conjuncts_with_config(
     left: &CardinalityProfile,
     right: &CardinalityProfile,
     conjuncts: &[Expr],
+    composite_inner_join: bool,
     ctx: &QueryContext,
     config: &CardinalityEstimationConfig,
     catalog: Option<&dyn Catalog>,
@@ -2856,13 +3058,28 @@ fn join_selectivity_from_conjuncts_with_config(
             .total_cmp(&a.chosen_ndv.value)
             .then_with(|| a.null_safe.cmp(&b.null_safe))
     });
-    // TODO(statistics): Once sampling is available, replace products across composite equality
-    // keys with sampled multi-column NDV and overlap statistics.
-    let mut equality_selectivity = 1.0;
-    let mut equality_match_probability = 1.0;
+    let composite = composite_inner_join
+        .then(|| composite_join_estimate(&equality_edges, &classes, left, right, catalog))
+        .flatten();
+    let covered_edges = composite
+        .as_ref()
+        .map(|estimate| estimate.covered_edges.clone())
+        .unwrap_or_default();
+    let mut equality_selectivity = composite
+        .as_ref()
+        .map_or(1.0, |estimate| estimate.pair_selectivity);
+    let mut equality_match_probability = composite
+        .as_ref()
+        .map_or(1.0, |estimate| estimate.left_match_probability);
     let mut left_equality_coverages = Vec::new();
-    let mut has_cross_input_equality = false;
+    let mut has_cross_input_equality = composite.is_some();
     for edge in equality_edges {
+        let normalized_edge = oriented_join_columns(edge.left, edge.right, left, right)
+            .map(|(left_column, right_column, _, _)| (left_column, right_column));
+        if normalized_edge.is_some_and(|edge| covered_edges.contains(&edge)) {
+            classes.union(edge.left, edge.right, edge.chosen_ndv);
+            continue;
+        }
         let connects_inputs =
             column_sides(edge.left, left, right) != column_sides(edge.right, left, right);
         let edge_estimate =
@@ -4049,6 +4266,243 @@ struct EqualityEdge {
     right_ndv: Estimate,
 }
 
+struct CompositeJoinEstimate {
+    covered_edges: BTreeSet<(Column, Column)>,
+    uses_unique_constraint: bool,
+    pair_selectivity: f64,
+    left_match_probability: f64,
+}
+
+fn non_null_fraction(non_null_rows: f64, population_rows: f64) -> f64 {
+    if population_rows <= 0.0 {
+        0.0
+    } else {
+        (non_null_rows / population_rows).clamp(0.0, 1.0)
+    }
+}
+
+fn composite_join_estimate(
+    edges: &[EqualityEdge],
+    classes: &EquivalenceClassState,
+    left: &CardinalityProfile,
+    right: &CardinalityProfile,
+    catalog: Option<&dyn Catalog>,
+) -> Option<CompositeJoinEstimate> {
+    let mut classes = classes.clone();
+    let pairs = edges
+        .iter()
+        .filter(|edge| !edge.null_safe && !classes.equivalent(edge.left, edge.right))
+        .filter_map(|edge| {
+            let (left_column, right_column, left_profile, right_profile) =
+                oriented_join_columns(edge.left, edge.right, left, right)?;
+            let (ValueId::Base(left_value), ValueId::Base(right_value)) =
+                (left_profile.value.as_ref()?, right_profile.value.as_ref()?)
+            else {
+                return None;
+            };
+            Some((
+                ValueId::Base(left_value.clone()),
+                ValueId::Base(right_value.clone()),
+                left_column,
+                right_column,
+            ))
+        })
+        .collect::<Vec<_>>();
+    if pairs.len() < 2 {
+        return None;
+    }
+
+    [true, false]
+        .into_iter()
+        .flat_map(|joint_on_left| {
+            let joints = if joint_on_left {
+                &left.joint_ndvs
+            } else {
+                &right.joint_ndvs
+            };
+            let pairs = pairs.clone();
+            joints.iter().filter_map(move |joint| {
+                if joint.values.len() < 2 {
+                    return None;
+                }
+                let represented = joint
+                    .values
+                    .iter()
+                    .filter_map(|value| {
+                        pairs.iter().find(|(left_value, right_value, _, _)| {
+                            if joint_on_left {
+                                left_value == value
+                            } else {
+                                right_value == value
+                            }
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                if represented.len() != joint.values.len() {
+                    return None;
+                }
+                let other_values = represented
+                    .iter()
+                    .map(|(left_value, right_value, _, _)| {
+                        if joint_on_left {
+                            right_value.clone()
+                        } else {
+                            left_value.clone()
+                        }
+                    })
+                    .collect::<BTreeSet<_>>();
+                if other_values.len() != joint.values.len() {
+                    return None;
+                }
+                let other_joint = (if joint_on_left {
+                    &right.joint_ndvs
+                } else {
+                    &left.joint_ndvs
+                })
+                .iter()
+                .find(|candidate| candidate.values == other_values);
+                let other_non_null = other_joint.map_or_else(
+                    || {
+                        represented.iter().fold(
+                            1.0,
+                            |fraction, (_, _, left_column, right_column)| {
+                                let column = if joint_on_left {
+                                    *right_column
+                                } else {
+                                    *left_column
+                                };
+                                let profile = if joint_on_left {
+                                    &right.columns[&column]
+                                } else {
+                                    &left.columns[&column]
+                                };
+                                fraction
+                                    * non_null_fraction(
+                                        profile.frequency.value,
+                                        if joint_on_left {
+                                            right.rows.value
+                                        } else {
+                                            left.rows.value
+                                        },
+                                    )
+                            },
+                        )
+                    },
+                    |other| non_null_fraction(other.non_null_rows, other.population_rows),
+                );
+                let other_rows = if joint_on_left {
+                    right.rows.value
+                } else {
+                    left.rows.value
+                };
+                let other_relation = if joint_on_left { right } else { left };
+                let other_unique_distinct = other_joint
+                    .and_then(|other| composite_unique_distinct(other, other_relation, catalog));
+                let other_distinct = other_joint
+                    .map_or_else(
+                        || {
+                            represented.iter().fold(
+                                1.0,
+                                |product, (_, _, left_column, right_column)| {
+                                    let column = if joint_on_left {
+                                        *right_column
+                                    } else {
+                                        *left_column
+                                    };
+                                    product
+                                        * if joint_on_left {
+                                            right.columns[&column].distinct.value
+                                        } else {
+                                            left.columns[&column].distinct.value
+                                        }
+                                },
+                            )
+                        },
+                        |other| other_unique_distinct.unwrap_or(other.distinct.value),
+                    )
+                    .min(other_rows * other_non_null);
+                let joint_non_null = non_null_fraction(joint.non_null_rows, joint.population_rows);
+                let joint_unique_distinct = composite_unique_distinct(
+                    joint,
+                    if joint_on_left { left } else { right },
+                    catalog,
+                );
+                let joint_distinct = joint_unique_distinct.unwrap_or(joint.distinct.value);
+                let (left_distinct, right_distinct, left_non_null, right_non_null) =
+                    if joint_on_left {
+                        (
+                            joint_distinct,
+                            other_distinct,
+                            joint_non_null,
+                            other_non_null,
+                        )
+                    } else {
+                        (
+                            other_distinct,
+                            joint_distinct,
+                            other_non_null,
+                            joint_non_null,
+                        )
+                    };
+                let intersection = left_distinct.min(right_distinct);
+                let pair_selectivity = if left_distinct <= 0.0 || right_distinct <= 0.0 {
+                    0.0
+                } else {
+                    left_non_null * right_non_null * intersection / (left_distinct * right_distinct)
+                };
+                Some(CompositeJoinEstimate {
+                    covered_edges: represented
+                        .iter()
+                        .map(|(_, _, left, right)| (*left, *right))
+                        .collect(),
+                    uses_unique_constraint: joint_unique_distinct.is_some()
+                        || other_unique_distinct.is_some(),
+                    pair_selectivity: pair_selectivity.clamp(0.0, 1.0),
+                    left_match_probability: if left_distinct <= 0.0 {
+                        0.0
+                    } else {
+                        (left_non_null * intersection / left_distinct).clamp(0.0, 1.0)
+                    },
+                })
+            })
+        })
+        .max_by_key(|estimate| {
+            (
+                estimate.covered_edges.len(),
+                estimate.uses_unique_constraint,
+            )
+        })
+}
+
+fn composite_unique_distinct(
+    joint: &JointNdv,
+    profile: &CardinalityProfile,
+    catalog: Option<&dyn Catalog>,
+) -> Option<f64> {
+    let catalog = catalog?;
+    let bases = joint
+        .values
+        .iter()
+        .map(|value| match value {
+            ValueId::Base(base) => Some(base),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let base = bases.first()?;
+    if bases.iter().any(|candidate| candidate.table != base.table)
+        || !profile_has_complete_base_population(profile, base, catalog)
+    {
+        return None;
+    }
+    let statistics = catalog.table_by_ref(&base.table).ok()?.statistics?;
+    let unique = statistics.constraints.unique_keys.iter().any(|key| {
+        key.columns()
+            .iter()
+            .all(|name| bases.iter().any(|base| base.name == *name))
+    });
+    unique.then_some(joint.non_null_rows)
+}
+
 #[derive(Clone)]
 struct EquivalenceClassNode {
     column: Column,
@@ -4681,10 +5135,11 @@ fn relational_inputs(op: Operator, ctx: &QueryContext) -> Vec<Operator> {
 mod tests {
     use super::*;
     use crate::{
-        AggregateExpr, AggregateFunction, Aggregation, BinaryOp, Catalog, ColumnData, ExprData,
-        ForeignKey, Join, JoinType, Limit, Map, MemoryCatalog, OperatorData, Output, Projection,
-        ScalarValue, Scan, Selection, TableFunction, TableFunctionDef, TableRef, TableStatistics,
-        UniqueKey,
+        AggregateExpr, AggregateFunction, Aggregation, BinaryOp, CardinalityStatistics, Catalog,
+        ColumnData, ColumnGroupSource, ColumnGroupStatistics, ColumnSet, ColumnStatistics,
+        ExprData, ForeignKey, Join, JoinType, Limit, Map, MemoryCatalog, OperatorData, Output,
+        Projection, ScalarValue, Scan, Selection, TableFunction, TableFunctionDef, TableRef,
+        TableStatistics, UniqueKey,
     };
     use arrow_schema::{DataType, Field, Schema};
     use std::sync::Arc;
@@ -4693,7 +5148,7 @@ mod tests {
     fn scan_statistic_selection_reason_reports_the_baseline_fallback() {
         assert_eq!(
             scan_statistic_selection_reason(Some(10), Some(12.0), true),
-            "hll_selected"
+            "catalog_selected"
         );
         assert_eq!(
             scan_statistic_selection_reason(Some(10), None, false),
@@ -6499,6 +6954,7 @@ mod tests {
                     )]
                     .into_iter()
                     .collect(),
+                    column_groups: Vec::new(),
                     constraints: Default::default(),
                 },
             )
@@ -6561,6 +7017,7 @@ mod tests {
                     )]
                     .into_iter()
                     .collect(),
+                    column_groups: Vec::new(),
                     constraints: Default::default(),
                 },
             )
@@ -6626,6 +7083,7 @@ mod tests {
                     )]
                     .into_iter()
                     .collect(),
+                    column_groups: Vec::new(),
                     constraints: Default::default(),
                 },
             )
@@ -6685,6 +7143,7 @@ mod tests {
                     )]
                     .into_iter()
                     .collect(),
+                    column_groups: Vec::new(),
                     constraints: Default::default(),
                 },
             )
@@ -6749,6 +7208,87 @@ mod tests {
             .get::<CardinalityEstimationV1>(&ctx, aggregation)
             .unwrap();
         assert_eq!(profile.rows.value, 100.0);
+    }
+
+    #[test]
+    fn aggregation_uses_largest_available_joint_ndv_regardless_of_key_order() {
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        catalog
+            .create_table(TableRef::bare("pairs"), schema(), None)
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                TableRef::bare("pairs"),
+                TableStatistics {
+                    row_count: Some(1_000),
+                    size_bytes: None,
+                    column_statistics: [
+                        (
+                            "id".to_string(),
+                            ColumnStatistics {
+                                lower_bound: None,
+                                upper_bound: None,
+                                frequency: Some(1_000),
+                                distinct: Some(100),
+                                distribution: None,
+                                sketches: None,
+                            },
+                        ),
+                        (
+                            "value".to_string(),
+                            ColumnStatistics {
+                                lower_bound: None,
+                                upper_bound: None,
+                                frequency: Some(1_000),
+                                distinct: Some(100),
+                                distribution: None,
+                                sketches: None,
+                            },
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
+                    column_groups: vec![ColumnGroupStatistics {
+                        columns: ColumnSet::try_new(vec![0, 1], 2).unwrap(),
+                        cardinality: CardinalityStatistics {
+                            population_rows: 1_000,
+                            non_null_rows: 1_000,
+                            distinct: Some(100),
+                            distinct_values: None,
+                        },
+                        source: ColumnGroupSource::SchemaPrefix,
+                    }],
+                    constraints: Default::default(),
+                },
+            )
+            .unwrap();
+        let mut ctx = QueryContext::new();
+        let scan = ctx
+            .add_scan_from_catalog(catalog.as_ref(), TableRef::bare("pairs"))
+            .unwrap();
+        let scan_columns = match scan.get(&ctx) {
+            OperatorData::Scan(scan_data) => scan_data.columns.clone(),
+            _ => unreachable!(),
+        };
+        let count = ColumnData::new("count", DataType::Int64).add(&mut ctx);
+        let aggregation = OperatorData::Aggregation(Aggregation {
+            keys: vec![
+                ExprData::ColumnRef(scan_columns[1]).add(&mut ctx),
+                ExprData::ColumnRef(scan_columns[0]).add(&mut ctx),
+            ],
+            aggregates: vec![(count, AggregateExpr::CountStar)],
+            input: scan,
+        })
+        .add(&mut ctx);
+        let mut analyses = AnalysisContext::new(catalog);
+        assert_eq!(
+            analyses
+                .get::<CardinalityEstimationV1>(&ctx, aggregation)
+                .unwrap()
+                .rows
+                .value,
+            100.0
+        );
     }
 
     #[test]
@@ -8385,6 +8925,7 @@ mod tests {
             )]
             .into_iter()
             .collect(),
+            column_groups: Vec::new(),
             constraints: Default::default(),
         }
     }
@@ -8406,6 +8947,7 @@ mod tests {
             )]
             .into_iter()
             .collect(),
+            column_groups: Vec::new(),
             constraints: Default::default(),
         }
     }
