@@ -2441,8 +2441,11 @@ fn apply_selection_profile(
 ) -> CardinalityProfile {
     // Charge only information newly introduced by each conjunct. This handles both predicates
     // repeated across stacked selections and redundant equalities inside one conjunction.
+    // Sample conjuncts progress a working sample so later conjuncts are conditional, not
+    // independent marginals against the full leaf sample.
     let input_upper = profile.rows.upper;
     let mut used_sample = false;
+    let mut working_sample = leaf_sample.cloned();
     for conjunct in conjuncts(predicate, ctx) {
         let before = facts.constraints.clone();
         facts.apply_predicate(conjunct, ctx);
@@ -2450,10 +2453,11 @@ fn apply_selection_profile(
             1.0
         } else if facts.constraints.contradictory {
             0.0
-        } else if let Some(sample_sel) = leaf_sample.and_then(|sample| {
-            sample_cardinality::sample_conjunct_selectivity(sample, conjunct, ctx)
+        } else if let Some((sample_sel, next_sample)) = working_sample.as_ref().and_then(|sample| {
+            sample_cardinality::sample_conjunct_selectivity_progressing(sample, conjunct, ctx)
         }) {
             used_sample = true;
+            working_sample = Some(next_sample);
             sample_sel
         } else {
             filter_selectivity(&profile, conjunct, ctx, config).value
@@ -2716,10 +2720,19 @@ fn join_profile_with_selectivity_and_classes(
     let left_equality_coverages = estimate.left_equality_coverages.clone();
     let residual_selectivity = estimate.residual_selectivity;
     let selectivity = estimate.selectivity;
+    // Point estimate uses pair selectivity; upper is the independent product bound, then
+    // tightened by selectivity (never above the cross-product of input uppers).
+    let product_upper = multiply_options(left.rows.upper, right.rows.upper);
+    let selective_upper = product_upper.map(|product| product * selectivity.value);
+    let inner_upper = match (product_upper, selective_upper) {
+        (Some(product), Some(selective)) => Some(selective.min(product)),
+        (None, Some(selective)) | (Some(selective), None) => Some(selective),
+        (None, None) => None,
+    };
     let inner_rows = Estimate::derived(
         left.rows.value * right.rows.value * selectivity.value,
         Some(0.0),
-        multiply_options(left.rows.upper, right.rows.upper).map(|v| v * selectivity.value),
+        inner_upper,
     );
     match join_type {
         JoinType::LeftSemi => semi_join_profile(
@@ -2809,6 +2822,7 @@ fn join_profile_with_selectivity_and_classes(
                 false,
             );
             mark_columns_non_null(&mut profile, &non_null_equality_columns);
+            apply_equality_intersection_domains(&mut profile, &left_equality_coverages);
             profile
         }
     }
@@ -3006,8 +3020,9 @@ fn derive_join_side_columns(
             output.distinct = output
                 .distinct
                 .cap(output.frequency.value, EstimateSource::Derived);
+            // Join changes the sketched population; drop HLL/SpaceSaving. Retain MCV/histogram as
+            // a base-population proxy so residual filters can resolve stats via equality classes.
             output.sketches = None;
-            output.distribution = None;
             (column, output)
         })
         .collect()
@@ -3020,6 +3035,35 @@ fn cap_equivalent_column_distinct_counts(profile: &mut CardinalityProfile) {
                 column_profile.distinct = column_profile
                     .distinct
                     .cap(class.distinct.value, EstimateSource::Derived);
+            }
+        }
+    }
+}
+
+/// After an inner equi-join, shrink join-key / eq-class NDVs to the equality intersection domain.
+fn apply_equality_intersection_domains(
+    profile: &mut CardinalityProfile,
+    coverages: &[LeftEqualityCoverage],
+) {
+    for coverage in coverages {
+        let intersection = coverage.intersection_distinct.max(0.0);
+        if let Some(column_profile) = profile.columns.get_mut(&coverage.column) {
+            column_profile.distinct = column_profile
+                .distinct
+                .cap(intersection, EstimateSource::Derived);
+        }
+        for class in &mut profile.equivalence_classes {
+            if !class.columns.contains(&coverage.column) {
+                continue;
+            }
+            class.distinct = class.distinct.cap(intersection, EstimateSource::Derived);
+            let class_distinct = class.distinct.value;
+            for column in &class.columns {
+                if let Some(column_profile) = profile.columns.get_mut(column) {
+                    column_profile.distinct = column_profile
+                        .distinct
+                        .cap(class_distinct, EstimateSource::Derived);
+                }
             }
         }
     }
@@ -3158,6 +3202,8 @@ fn join_selectivity_from_conjuncts_with_config(
             .total_cmp(&a.chosen_ndv.value)
             .then_with(|| a.null_safe.cmp(&b.null_safe))
     });
+    // TODO(ce): consume catalog joint NDVs / multi-column histograms for composite edges and
+    // correlated residuals beyond leading schema-prefix HLLs.
     let composite = composite_inner_join
         .then(|| composite_join_estimate(&equality_edges, &classes, left, right, catalog))
         .flatten();
@@ -3197,15 +3243,23 @@ fn join_selectivity_from_conjuncts_with_config(
         if classes.equivalent(edge.left, edge.right) {
             continue;
         }
+        // Carry the equality *intersection* domain into the merged class (not only
+        // min(left_ndv, right_ndv) via chosen_ndv). Partial range overlap can be strictly smaller.
+        let mut domain_ndv = edge.chosen_ndv.clone();
         if let Some(edge_estimate) = edge_estimate {
             has_cross_input_equality = true;
             equality_selectivity *= edge_estimate.pair_selectivity;
             equality_match_probability *= edge_estimate.left_match_probability;
             if let Some(coverage) = edge_estimate.left_coverage {
+                domain_ndv = Estimate::derived(
+                    coverage.intersection_distinct,
+                    Some(0.0),
+                    Some(coverage.intersection_distinct),
+                );
                 left_equality_coverages.push(coverage);
             }
         }
-        classes.union(edge.left, edge.right, edge.chosen_ndv);
+        classes.union(edge.left, edge.right, domain_ndv);
     }
 
     let selectivity = (equality_selectivity * residual_selectivity).clamp(0.0, 1.0);
@@ -4052,7 +4106,11 @@ fn binary_selectivity(
         } else {
             (profile.frequency.value / population_rows).clamp(0.0, 1.0)
         };
-        let equality_selectivity = frequent_value_selectivity(profile, literal)
+        // Prefer MCV/histogram from an equality-class peer when this column lost (or never had)
+        // distribution after a join.
+        let stats_profile =
+            distribution_profile_for_column(left_profile, right_profile, column).unwrap_or(profile);
+        let equality_selectivity = frequent_value_selectivity(stats_profile, literal)
             .unwrap_or_else(|| non_null_fraction / profile.distinct.value.max(1.0));
         return match normalized_op {
             BinaryOp::Eq => Estimate::derived(equality_selectivity, Some(0.0), Some(1.0)),
@@ -4062,7 +4120,8 @@ fn binary_selectivity(
                 Some(1.0),
             ),
             BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq => {
-                let conditional = range_selectivity(profile, literal, normalized_op, config).value;
+                let conditional =
+                    range_selectivity(stats_profile, literal, normalized_op, config).value;
                 Estimate::derived(conditional * non_null_fraction, Some(0.0), Some(1.0))
             }
             _ => Estimate::derived(config.default_predicate_selectivity, Some(0.0), Some(1.0)),
@@ -4123,6 +4182,51 @@ fn binary_selectivity(
         );
     }
     Estimate::derived(config.default_predicate_selectivity, Some(0.0), Some(1.0))
+}
+
+/// Column profile whose `distribution` should drive literal selectivity for `column`, walking
+/// equality classes across `left`/`right` join inputs (or a single joined profile).
+fn distribution_profile_for_column<'a>(
+    left: &'a CardinalityProfile,
+    right: &'a CardinalityProfile,
+    column: Column,
+) -> Option<&'a ColumnProfile> {
+    let mut peers = BTreeSet::from([column]);
+    for classes in [&left.equivalence_classes, &right.equivalence_classes] {
+        for class in classes {
+            if class.columns.contains(&column) {
+                peers.extend(class.columns.iter().copied());
+            }
+        }
+    }
+    peers
+        .into_iter()
+        .filter_map(|peer| {
+            left.columns
+                .get(&peer)
+                .or_else(|| right.columns.get(&peer))
+                .filter(|profile| profile.distribution.is_some())
+        })
+        .max_by_key(|profile| distribution_richness(profile))
+}
+
+fn distribution_richness(profile: &ColumnProfile) -> usize {
+    let Some(distribution) = profile.distribution.as_ref() else {
+        return 0;
+    };
+    let mcv = distribution
+        .most_common_values
+        .as_ref()
+        .map(|mcv| mcv.entries().len())
+        .unwrap_or(0);
+    let buckets = distribution
+        .histogram
+        .as_ref()
+        .map(|histogram| histogram.buckets().len())
+        .unwrap_or(0);
+    mcv.saturating_mul(1_000)
+        .saturating_add(buckets)
+        .saturating_add(1)
 }
 
 fn frequent_value_selectivity(profile: &ColumnProfile, literal: &ScalarValue) -> Option<f64> {
@@ -7378,6 +7482,113 @@ mod tests {
     }
 
     #[test]
+    fn leaf_sample_charges_conjuncts_conditionally_not_independently() {
+        use arrow_array::{Int64Array, RecordBatch, StringArray};
+        use optd_sampling::{SampleProvenance, TableSample};
+
+        // seg=A and flag=1 are perfectly correlated: joint sel=0.5, product of
+        // marginals would be 0.25 if charged independently against the full sample.
+        let mut ctx = QueryContext::new();
+        let seg = ColumnData::new("seg", DataType::Utf8).add(&mut ctx);
+        let flag = ColumnData::new("flag", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("users"),
+            columns: vec![seg, flag],
+        })
+        .add(&mut ctx);
+        let seg_eq = ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: ExprData::ColumnRef(seg).add(&mut ctx),
+            right: ExprData::Literal(ScalarValue::Utf8("A".into())).add(&mut ctx),
+        }
+        .add(&mut ctx);
+        let flag_eq = ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: ExprData::ColumnRef(flag).add(&mut ctx),
+            right: ExprData::Literal(ScalarValue::Int64(1)).add(&mut ctx),
+        }
+        .add(&mut ctx);
+        let predicate = ExprData::Nary {
+            op: NaryOp::And,
+            exprs: vec![seg_eq, flag_eq],
+        }
+        .add(&mut ctx);
+        let selection = OperatorData::Selection(Selection {
+            predicate,
+            input: scan,
+        })
+        .add(&mut ctx);
+
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("seg", DataType::Utf8, false),
+            Field::new("flag", DataType::Int64, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(StringArray::from(vec!["A", "A", "B", "B"])),
+                Arc::new(Int64Array::from(vec![1_i64, 1, 0, 0])),
+            ],
+        )
+        .unwrap();
+        let samples =
+            TableSample::try_new(schema.clone(), vec![batch], 4, 400, SampleProvenance::Past)
+                .unwrap();
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        catalog
+            .create_table(TableRef::bare("users"), schema, None)
+            .unwrap();
+        catalog
+            .set_table_samples(TableRef::bare("users"), samples)
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                TableRef::bare("users"),
+                TableStatistics {
+                    row_count: Some(400),
+                    size_bytes: None,
+                    column_statistics: [
+                        (
+                            "seg".to_string(),
+                            ColumnStatistics {
+                                lower_bound: None,
+                                upper_bound: None,
+                                frequency: Some(400),
+                                distinct: Some(2),
+                                sketches: None,
+                                distribution: None,
+                            },
+                        ),
+                        (
+                            "flag".to_string(),
+                            ColumnStatistics {
+                                lower_bound: None,
+                                upper_bound: None,
+                                frequency: Some(400),
+                                distinct: Some(2),
+                                sketches: None,
+                                distribution: None,
+                            },
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
+                    column_groups: Vec::new(),
+                    constraints: Default::default(),
+                },
+            )
+            .unwrap();
+        let mut analyses = AnalysisContext::new(catalog);
+        let profile = analyses
+            .get::<CardinalityEstimationV1>(&ctx, selection)
+            .unwrap();
+
+        // Joint: 2/4 → 200 rows. Independent product would yield 100.
+        assert_eq!(profile.rows.value, 200.0);
+        assert_eq!(profile.rows.source, EstimateSource::Sample);
+    }
+
+    #[test]
     fn leaf_sample_filter_preserves_catalog_join_key_ndv() {
         use arrow_array::{Int64Array, RecordBatch, StringArray};
         use optd_sampling::{SampleProvenance, TableSample};
@@ -8585,6 +8796,140 @@ mod tests {
         assert!(!null_safe.domains_disjoint);
         assert_eq!(null_safe.pair_selectivity, 0.25);
         assert_eq!(null_safe.left_match_probability, 0.5);
+    }
+
+    #[test]
+    fn inner_join_carries_intersection_ndv_into_equivalence_class() {
+        let mut ctx = QueryContext::new();
+        let left_column = ColumnData::new("left", DataType::Int64).add(&mut ctx);
+        let right_column = ColumnData::new("right", DataType::Int64).add(&mut ctx);
+        let profile_from_values = |column, values: Vec<Option<i64>>| {
+            let statistics = table_stats_from_i64_values("key", &values);
+            let rows = Estimate::catalog(values.len() as f64);
+            CardinalityProfile::new(
+                rows.clone(),
+                [(
+                    column,
+                    column_profile_from_stats(&statistics.column_statistics["key"], &rows, None),
+                )]
+                .into_iter()
+                .collect(),
+            )
+        };
+        let left = profile_from_values(
+            left_column,
+            (1..=100).map(Some).collect::<Vec<Option<i64>>>(),
+        );
+        let right = profile_from_values(
+            right_column,
+            (51..=150).map(Some).collect::<Vec<Option<i64>>>(),
+        );
+        let on = equality_expr(&mut ctx, left_column, right_column);
+        let profile = join_profile_from_predicate(&left, &right, JoinType::Inner, on, &ctx);
+
+        // Overlap domain is 51..=100 → 50 distinct, not min(100,100)=100.
+        assert_eq!(profile.equivalence_classes.len(), 1);
+        assert!(
+            (profile.equivalence_classes[0].distinct.value - 50.0).abs() < 1e-6,
+            "class NDV={}, expected intersection 50",
+            profile.equivalence_classes[0].distinct.value
+        );
+        assert!(profile.columns[&left_column].distinct.value <= 50.0 + 1e-6);
+        assert!(profile.columns[&right_column].distinct.value <= 50.0 + 1e-6);
+    }
+
+    #[test]
+    fn residual_filter_uses_equality_class_partner_histogram() {
+        use crate::{
+            ColumnDistributionStatistics, MostCommonValue, MostCommonValues,
+            StatisticsCompleteness, StatisticsProvenance,
+        };
+
+        let mut ctx = QueryContext::new();
+        let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
+        let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
+        let rows = Estimate::exact(100.0);
+        let mcv = MostCommonValues::try_new(
+            vec![
+                MostCommonValue {
+                    value: ScalarValue::Int64(7),
+                    frequency: 90,
+                },
+                MostCommonValue {
+                    value: ScalarValue::Int64(1),
+                    frequency: 10,
+                },
+            ],
+            StatisticsCompleteness::Complete,
+            StatisticsProvenance::FullScan,
+        )
+        .unwrap();
+        let left = CardinalityProfile::new(
+            rows.clone(),
+            [(
+                left_key,
+                ColumnProfile {
+                    lower_bound: Some(ScalarValue::Int64(1)),
+                    upper_bound: Some(ScalarValue::Int64(7)),
+                    frequency: rows.clone(),
+                    distinct: Estimate::exact(2.0),
+                    value: None,
+                    sketches: None,
+                    distribution: Some(Arc::new(ColumnDistributionStatistics {
+                        null_count: None,
+                        most_common_values: Some(mcv),
+                        histogram: None,
+                    })),
+                },
+            )]
+            .into_iter()
+            .collect(),
+        );
+        let right = CardinalityProfile::new(
+            rows.clone(),
+            [(
+                right_key,
+                ColumnProfile {
+                    lower_bound: None,
+                    upper_bound: None,
+                    frequency: rows.clone(),
+                    distinct: Estimate::exact(100.0),
+                    value: None,
+                    sketches: None,
+                    distribution: None,
+                },
+            )]
+            .into_iter()
+            .collect(),
+        );
+        let on = equality_expr(&mut ctx, left_key, right_key);
+        let joined = join_profile_from_predicate(&left, &right, JoinType::Inner, on, &ctx);
+
+        assert!(joined.columns[&left_key].distribution.is_some());
+        assert!(joined.equivalence_classes.iter().any(|class| {
+            class.columns.contains(&left_key) && class.columns.contains(&right_key)
+        }));
+
+        let right_ref = ExprData::ColumnRef(right_key).add(&mut ctx);
+        let lit = ExprData::Literal(ScalarValue::Int64(7)).add(&mut ctx);
+        let residual = ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: right_ref,
+            right: lit,
+        }
+        .add(&mut ctx);
+        let selectivity = filter_selectivity(
+            &joined,
+            residual,
+            &ctx,
+            &CardinalityEstimationConfig::default(),
+        );
+        // Without eq-class hist: 1/100. With partner complete MCV: 90/100.
+        assert!(
+            (selectivity.value - 0.9).abs() < 1e-6,
+            "expected MCV selectivity 0.9 via eq-class, got {}",
+            selectivity.value
+        );
     }
 
     #[test]

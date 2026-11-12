@@ -5,7 +5,7 @@
 //! keep catalog distincts. This module never joins samples.
 
 use optd_sampling::{
-    SampleCompareOp, SamplePredicate, SampleRelation, SampleScalar, match_fraction,
+    SampleCompareOp, SamplePredicate, SampleRelation, SampleScalar, filter_relation, match_fraction,
 };
 
 use crate::{
@@ -26,14 +26,17 @@ pub(super) fn try_leaf_sample_relation(
     evaluate_sample_tree_no_filter(operator, ctx, analyses)
 }
 
-/// Selectivity of one conjunct against a leaf sample (`matches/n`, or `0` when empty/no match).
-pub(super) fn sample_conjunct_selectivity(
+/// Conditional sample selectivity: match fraction on `relation`, then the filtered relation for
+/// subsequent conjuncts (so AND is not charged as independent marginals).
+pub(super) fn sample_conjunct_selectivity_progressing(
     relation: &SampleRelation,
     conjunct: Expr,
     ctx: &QueryContext,
-) -> Option<f64> {
+) -> Option<(f64, SampleRelation)> {
     let predicate = translate_predicate(conjunct, ctx)?;
-    match_fraction(relation, &predicate).ok()
+    let selectivity = match_fraction(relation, &predicate).ok()?;
+    let next = filter_relation(relation, &predicate).ok()?;
+    Some((selectivity, next))
 }
 
 fn scan_pipeline_has_samples(

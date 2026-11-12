@@ -174,6 +174,7 @@ minimum, maintaining `lower <= value <= upper`.
 - [x] Consume population-safe single-column unique/FK catalog assertions.
 - [x] Collect query-local HLLs for leading logical-schema prefixes through length five.
 - [x] Consume population-safe joint NDV for grouping and direct composite inner equalities.
-- [ ] Replace uniform range overlap with histograms/samples.
-- [ ] Add sampled or workload-selected column groups beyond bounded schema prefixes.
+- [x] Replace uniform range overlap with histograms/samples (leaf samples + MCV/hist; progressive sample ANDs).
+- [ ] Add catalog **joint NDVs** beyond leading schema-prefix HLLs (correlated filters/joins/groupby).
+- [ ] Add **multi-column histograms** (or sampled column groups) for residual/correlated predicates.
 - [ ] Persist and refresh compatible sketches through a production catalog statistics provider.
