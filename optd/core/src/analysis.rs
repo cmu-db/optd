@@ -1857,12 +1857,15 @@ fn cardinality_profile(
         OperatorData::Selection(data) => {
             let input = CardinalityEstimationV1::get_shared(ctx, analyses, data.input)?;
             let input_facts = LogicalFactsAnalysis::get_shared(ctx, analyses, data.input)?;
+            let leaf_sample =
+                sample_cardinality::try_leaf_sample_relation(data.input, ctx, analyses)?;
             Ok(Arc::new(apply_selection_profile(
                 input.as_ref().clone(),
                 input_facts.as_ref().clone(),
                 data.predicate,
                 ctx,
                 &config,
+                leaf_sample.as_ref(),
             )))
         }
         OperatorData::Projection(data) => {
@@ -1961,10 +1964,17 @@ fn scan_profile(
         .map_err(|error| AnalysisError::Catalog(error.to_string()))?;
     let catalog_stats = table_metadata.statistics;
 
+    let sample_rows = analyses
+        .catalog()
+        .table_samples(&scan.table)
+        .ok()
+        .flatten()
+        .map(|sample| sample.source_rows as f64);
     let row_estimate = catalog_stats
         .as_ref()
         .and_then(|stats| stats.row_count)
         .map(|rows| Estimate::catalog(rows as f64))
+        .or_else(|| sample_rows.map(Estimate::catalog))
         .unwrap_or_else(|| Estimate::default(config.unknown_scan_rows));
 
     let mut columns = BTreeMap::new();
@@ -2417,9 +2427,12 @@ fn apply_selection_profile(
     predicate: Expr,
     ctx: &QueryContext,
     config: &CardinalityEstimationConfig,
+    leaf_sample: Option<&optd_sampling::SampleRelation>,
 ) -> CardinalityProfile {
     // Charge only information newly introduced by each conjunct. This handles both predicates
     // repeated across stacked selections and redundant equalities inside one conjunction.
+    let input_upper = profile.rows.upper;
+    let mut used_sample = false;
     for conjunct in conjuncts(predicate, ctx) {
         let before = facts.constraints.clone();
         facts.apply_predicate(conjunct, ctx);
@@ -2427,12 +2440,23 @@ fn apply_selection_profile(
             1.0
         } else if facts.constraints.contradictory {
             0.0
+        } else if let Some(sample_sel) = leaf_sample.and_then(|sample| {
+            sample_cardinality::sample_conjunct_selectivity(sample, conjunct, ctx)
+        }) {
+            used_sample = true;
+            sample_sel
         } else {
             filter_selectivity(&profile, conjunct, ctx, config).value
         };
         let value_restriction = value_restricted_filter_column(conjunct, ctx);
         profile = scale_profile(profile, selectivity, value_restriction);
         tighten_filter_columns(&mut profile, conjunct, ctx);
+    }
+    if used_sample {
+        // Preserve LpBound-style filter endpoints: lower stays 0, upper inherits input mass.
+        profile.rows.source = EstimateSource::Sample;
+        profile.rows.lower = Some(0.0);
+        profile.rows.upper = input_upper.or(profile.rows.upper);
     }
     profile
 }
@@ -7034,8 +7058,8 @@ mod tests {
                             upper_bound: Some(ScalarValue::Int64(100)),
                             frequency: Some(100),
                             distinct: Some(100),
+                                                        sketches: None,
                             distribution: None,
-                            sketches: None,
                         },
                     )]
                     .into_iter()
@@ -7097,8 +7121,8 @@ mod tests {
                             upper_bound: Some(ScalarValue::Int64(100)),
                             frequency: Some(100),
                             distinct: Some(100),
+                                                        sketches: None,
                             distribution: None,
-                            sketches: None,
                         },
                     )]
                     .into_iter()
@@ -7195,7 +7219,110 @@ mod tests {
     }
 
     #[test]
-    fn cardinality_estimation_uses_samples_for_inner_equijoin() {
+    fn cardinality_estimation_sample_zero_matches_estimates_zero() {
+        use arrow_array::{Int64Array, RecordBatch};
+        use optd_sampling::{SampleProvenance, TableSample};
+
+        let mut ctx = QueryContext::new();
+        let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("users"),
+            columns: vec![id],
+        })
+        .add(&mut ctx);
+        let id_ref = ExprData::ColumnRef(id).add(&mut ctx);
+        let lit = ExprData::Literal(ScalarValue::Int64(99)).add(&mut ctx);
+        let predicate = ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: id_ref,
+            right: lit,
+        }
+        .add(&mut ctx);
+        let selection = OperatorData::Selection(Selection {
+            input: scan,
+            predicate,
+        })
+        .add(&mut ctx);
+
+        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]));
+        let batch =
+            RecordBatch::try_new(schema.clone(), vec![Arc::new(Int64Array::from(vec![1, 2, 3]))])
+                .unwrap();
+        let samples =
+            TableSample::try_new(schema.clone(), vec![batch], 3, 300, SampleProvenance::Past)
+                .unwrap();
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        catalog
+            .create_table(TableRef::bare("users"), schema, None)
+            .unwrap();
+        catalog
+            .set_table_samples(TableRef::bare("users"), samples)
+            .unwrap();
+        let mut analyses = AnalysisContext::new(catalog);
+        let profile = analyses
+            .get::<CardinalityEstimationV1>(&ctx, selection)
+            .unwrap();
+        assert_eq!(profile.rows.value, 0.0);
+        assert_eq!(profile.rows.source, EstimateSource::Sample);
+    }
+
+    #[test]
+    fn cardinality_estimation_uses_samples_for_date32_range() {
+        use arrow_array::{Date32Array, RecordBatch};
+        use optd_sampling::{SampleProvenance, TableSample};
+
+        let mut ctx = QueryContext::new();
+        let d = ColumnData::new("d", DataType::Date32).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("orders"),
+            columns: vec![d],
+        })
+        .add(&mut ctx);
+        let d_ref = ExprData::ColumnRef(d).add(&mut ctx);
+        let lit = ExprData::Literal(ScalarValue::Date32(25)).add(&mut ctx);
+        let predicate = ExprData::Binary {
+            op: BinaryOp::Lt,
+            left: d_ref,
+            right: lit,
+        }
+        .add(&mut ctx);
+        let selection = OperatorData::Selection(Selection {
+            input: scan,
+            predicate,
+        })
+        .add(&mut ctx);
+
+        let schema = Arc::new(Schema::new(vec![Field::new("d", DataType::Date32, true)]));
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![Arc::new(Date32Array::from(vec![
+                Some(10),
+                Some(20),
+                Some(30),
+                Some(40),
+            ]))],
+        )
+        .unwrap();
+        let samples =
+            TableSample::try_new(schema.clone(), vec![batch], 4, 400, SampleProvenance::Past)
+                .unwrap();
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        catalog
+            .create_table(TableRef::bare("orders"), schema, None)
+            .unwrap();
+        catalog
+            .set_table_samples(TableRef::bare("orders"), samples)
+            .unwrap();
+        let mut analyses = AnalysisContext::new(catalog);
+        let profile = analyses
+            .get::<CardinalityEstimationV1>(&ctx, selection)
+            .unwrap();
+        assert_eq!(profile.rows.value, 200.0);
+        assert_eq!(profile.rows.source, EstimateSource::Sample);
+    }
+
+    #[test]
+    fn cardinality_estimation_does_not_use_sample_joins() {
         use arrow_array::{Int64Array, RecordBatch};
         use optd_sampling::{SampleProvenance, TableSample};
 
@@ -7262,16 +7389,25 @@ mod tests {
         catalog
             .set_table_samples(TableRef::bare("right_t"), right_samples)
             .unwrap();
+        catalog
+            .set_table_statistics(
+                TableRef::bare("left_t"),
+                table_stats_for_column("id", 30, 30),
+            )
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                TableRef::bare("right_t"),
+                table_stats_for_column("id", 10, 10),
+            )
+            .unwrap();
         let mut analyses = AnalysisContext::new(catalog);
 
         let profile = analyses.get::<CardinalityEstimationV1>(&ctx, join).unwrap();
 
-        // 2 sample join rows * (30/3) * (10/2) = 2 * 10 * 5 = 100.
-        assert_eq!(profile.rows.value, 100.0);
-        assert_eq!(profile.rows.source, EstimateSource::Sample);
-        assert_eq!(profile.rows.lower, Some(0.0));
-        // LpBound: min(30*5, 10*20, 30*10) = 150
-        assert_eq!(profile.rows.upper, Some(150.0));
+        // Umbra-style: samples do not join; Selinger/HLL path estimates the join.
+        assert_ne!(profile.rows.source, EstimateSource::Sample);
+        assert!(profile.rows.value.is_finite() && profile.rows.value > 0.0);
     }
 
     #[test]
@@ -7388,8 +7524,8 @@ mod tests {
                             upper_bound: Some(ScalarValue::Int64(9)),
                             frequency: Some(10),
                             distinct: Some(7),
+                                                        sketches: None,
                             distribution: None,
-                            sketches: None,
                         },
                     )]
                     .into_iter()
@@ -7481,8 +7617,8 @@ mod tests {
                             upper_bound: Some(ScalarValue::Date32(10_591)),
                             frequency: Some(10_000),
                             distinct: Some(2_557),
+                                                        sketches: None,
                             distribution: None,
-                            sketches: None,
                         },
                     )]
                     .into_iter()
@@ -7545,8 +7681,8 @@ mod tests {
                             upper_bound: None,
                             frequency: Some(100),
                             distinct: Some(10),
+                                                        sketches: None,
                             distribution: None,
-                            sketches: None,
                         },
                     )]
                     .into_iter()
@@ -7638,8 +7774,8 @@ mod tests {
                                 upper_bound: None,
                                 frequency: Some(1_000),
                                 distinct: Some(100),
+                                                                sketches: None,
                                 distribution: None,
-                                sketches: None,
                             },
                         ),
                         (
@@ -7649,8 +7785,8 @@ mod tests {
                                 upper_bound: None,
                                 frequency: Some(1_000),
                                 distinct: Some(100),
+                                                                sketches: None,
                                 distribution: None,
-                                sketches: None,
                             },
                         ),
                     ]
@@ -9338,8 +9474,8 @@ mod tests {
                     upper_bound: observed.iter().max().copied().map(ScalarValue::Int64),
                     frequency: Some(observed.len()),
                     distinct: Some(distinct),
+                                        sketches: None,
                     distribution: None,
-                    sketches: None,
                 },
             )]
             .into_iter()
@@ -9360,8 +9496,8 @@ mod tests {
                     upper_bound: None,
                     frequency: Some(rows),
                     distinct: Some(distinct),
+                                        sketches: None,
                     distribution: None,
-                    sketches: None,
                 },
             )]
             .into_iter()

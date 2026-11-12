@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use arrow_array::cast::AsArray;
-use arrow_array::types::{Int32Type, Int64Type};
+use arrow_array::types::{Date32Type, Float64Type, Int32Type, Int64Type};
 use arrow_array::{Array, BooleanArray, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
 use arrow_select::concat::concat_batches;
@@ -24,16 +24,48 @@ pub enum SampleScalar {
     Int32(i32),
     Int64(i64),
     Float64(f64),
+    /// Days since the UNIX epoch.
+    Date32(i32),
     Utf8(String),
+}
+
+/// Comparison operator for sample predicates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SampleCompareOp {
+    Eq,
+    NotEq,
+    Lt,
+    LtEq,
+    Gt,
+    GtEq,
 }
 
 /// Predicate forms supported by sample filtering.
 #[derive(Debug, Clone, PartialEq)]
 pub enum SamplePredicate {
-    /// `column = literal` (NULL never matches).
-    EqColumnLiteral { column: String, value: SampleScalar },
+    /// `column <op> literal` (NULL never matches ordered/eq compares).
+    CompareColumnLiteral {
+        column: String,
+        op: SampleCompareOp,
+        value: SampleScalar,
+    },
+    /// `column <op> column` on the same relation.
+    CompareColumns {
+        left: String,
+        op: SampleCompareOp,
+        right: String,
+    },
+    /// SQL LIKE / ILIKE against a literal pattern (`%` / `_` wildcards).
+    Like {
+        column: String,
+        pattern: String,
+        negated: bool,
+        case_insensitive: bool,
+    },
     /// Conjunction of supported predicates.
     And(Vec<SamplePredicate>),
+    /// Disjunction of supported predicates.
+    Or(Vec<SamplePredicate>),
 }
 
 /// Intermediate sample relation used while walking an operator tree.
@@ -159,6 +191,28 @@ pub fn filter_relation(
     })
 }
 
+/// Fraction of sample rows matching `predicate` (`matches / n`). Returns `0.0` when `n == 0` or
+/// when no rows match (callers that want a floor must apply it themselves).
+pub fn match_fraction(
+    relation: &SampleRelation,
+    predicate: &SamplePredicate,
+) -> Result<f64, SampleError> {
+    let total = relation.num_rows();
+    if total == 0 {
+        return Ok(0.0);
+    }
+    let mut matches = 0usize;
+    for batch in &relation.batches {
+        let mask = evaluate_predicate(batch, predicate)?;
+        for index in 0..mask.len() {
+            if mask.is_valid(index) && mask.value(index) {
+                matches += 1;
+            }
+        }
+    }
+    Ok(matches as f64 / total as f64)
+}
+
 /// Inner equijoin over one or more column pairs with the same names on each side.
 ///
 /// Output columns are left columns followed by right columns. Duplicate names on the right are
@@ -249,42 +303,76 @@ fn evaluate_predicate(
             let mut mask = evaluate_predicate(batch, &parts[0])?;
             for part in &parts[1..] {
                 let next = evaluate_predicate(batch, part)?;
-                mask = and_bool(&mask, &next)?;
+                mask = combine_bool(&mask, &next, true)?;
             }
             Ok(mask)
         }
-        SamplePredicate::EqColumnLiteral { column, value } => {
-            eq_column_literal(batch, column, value)
+        SamplePredicate::Or(parts) => {
+            if parts.is_empty() {
+                return Ok(BooleanArray::from(vec![false; batch.num_rows()]));
+            }
+            let mut mask = evaluate_predicate(batch, &parts[0])?;
+            for part in &parts[1..] {
+                let next = evaluate_predicate(batch, part)?;
+                mask = combine_bool(&mask, &next, false)?;
+            }
+            Ok(mask)
         }
+        SamplePredicate::CompareColumnLiteral { column, op, value } => {
+            compare_column_literal(batch, column, *op, value)
+        }
+        SamplePredicate::CompareColumns { left, op, right } => {
+            compare_columns(batch, left, *op, right)
+        }
+        SamplePredicate::Like {
+            column,
+            pattern,
+            negated,
+            case_insensitive,
+        } => like_column(batch, column, pattern, *negated, *case_insensitive),
     }
 }
 
-fn and_bool(left: &BooleanArray, right: &BooleanArray) -> Result<BooleanArray, SampleError> {
+fn combine_bool(
+    left: &BooleanArray,
+    right: &BooleanArray,
+    and: bool,
+) -> Result<BooleanArray, SampleError> {
     if left.len() != right.len() {
         return Err(SampleError::Arrow("boolean mask length mismatch".into()));
     }
-    let values: Vec<bool> = (0..left.len())
-        .map(|index| left.value(index) && right.value(index))
+    let values: Vec<Option<bool>> = (0..left.len())
+        .map(|index| {
+            let l = left.is_valid(index).then(|| left.value(index));
+            let r = right.is_valid(index).then(|| right.value(index));
+            match (l, r) {
+                (Some(l), Some(r)) => Some(if and { l && r } else { l || r }),
+                _ => Some(false),
+            }
+        })
         .collect();
     Ok(BooleanArray::from(values))
 }
 
-fn eq_column_literal(
+fn compare_column_literal(
     batch: &RecordBatch,
     column: &str,
+    op: SampleCompareOp,
     value: &SampleScalar,
 ) -> Result<BooleanArray, SampleError> {
     let array = batch
         .column_by_name(column)
         .ok_or_else(|| SampleError::MissingColumn(column.to_string()))?;
+    if matches!(value, SampleScalar::Null) {
+        return Ok(BooleanArray::from(vec![false; batch.num_rows()]));
+    }
     match (array.data_type(), value) {
-        (_, SampleScalar::Null) => Ok(BooleanArray::from(vec![false; batch.num_rows()])),
         (DataType::Int64, SampleScalar::Int64(expected)) => {
             let array = array.as_primitive::<Int64Type>();
             Ok(BooleanArray::from(
                 array
                     .iter()
-                    .map(|value| Some(value == Some(*expected)))
+                    .map(|cell| Some(cell.is_some_and(|v| cmp_ord(op, &v, expected))))
                     .collect::<Vec<_>>(),
             ))
         }
@@ -293,7 +381,29 @@ fn eq_column_literal(
             Ok(BooleanArray::from(
                 array
                     .iter()
-                    .map(|value| Some(value == Some(*expected)))
+                    .map(|cell| Some(cell.is_some_and(|v| cmp_ord(op, &v, expected))))
+                    .collect::<Vec<_>>(),
+            ))
+        }
+        (DataType::Date32, SampleScalar::Date32(expected)) => {
+            let array = array.as_primitive::<Date32Type>();
+            Ok(BooleanArray::from(
+                array
+                    .iter()
+                    .map(|cell| Some(cell.is_some_and(|v| cmp_ord(op, &v, expected))))
+                    .collect::<Vec<_>>(),
+            ))
+        }
+        (DataType::Float64, SampleScalar::Float64(expected)) => {
+            let array = array.as_primitive::<Float64Type>();
+            Ok(BooleanArray::from(
+                array
+                    .iter()
+                    .map(|cell| {
+                        Some(cell.is_some_and(|v| {
+                            expected.is_finite() && v.is_finite() && cmp_ord(op, &v, expected)
+                        }))
+                    })
                     .collect::<Vec<_>>(),
             ))
         }
@@ -305,7 +415,7 @@ fn eq_column_literal(
             Ok(BooleanArray::from(
                 array
                     .iter()
-                    .map(|value| Some(value == Some(expected.as_str())))
+                    .map(|cell| Some(cell.is_some_and(|v| cmp_ord(op, v, expected.as_str()))))
                     .collect::<Vec<_>>(),
             ))
         }
@@ -314,14 +424,186 @@ fn eq_column_literal(
             Ok(BooleanArray::from(
                 array
                     .iter()
-                    .map(|value| Some(value == Some(*expected)))
+                    .map(|cell| Some(cell.is_some_and(|v| cmp_ord(op, &v, expected))))
                     .collect::<Vec<_>>(),
             ))
         }
         (data_type, _) => Err(SampleError::UnsupportedPredicate(format!(
-            "equality between {data_type} and {value:?}"
+            "compare {op:?} between {data_type} and {value:?}"
         ))),
     }
+}
+
+fn compare_columns(
+    batch: &RecordBatch,
+    left: &str,
+    op: SampleCompareOp,
+    right: &str,
+) -> Result<BooleanArray, SampleError> {
+    let left_array = batch
+        .column_by_name(left)
+        .ok_or_else(|| SampleError::MissingColumn(left.to_string()))?;
+    let right_array = batch
+        .column_by_name(right)
+        .ok_or_else(|| SampleError::MissingColumn(right.to_string()))?;
+    if left_array.data_type() != right_array.data_type() {
+        return Err(SampleError::UnsupportedPredicate(format!(
+            "column compare type mismatch {} vs {}",
+            left_array.data_type(),
+            right_array.data_type()
+        )));
+    }
+    match left_array.data_type() {
+        DataType::Int64 => {
+            let left = left_array.as_primitive::<Int64Type>();
+            let right = right_array.as_primitive::<Int64Type>();
+            Ok(BooleanArray::from(
+                (0..batch.num_rows())
+                    .map(|row| {
+                        Some(
+                            !left.is_null(row)
+                                && !right.is_null(row)
+                                && cmp_ord(op, &left.value(row), &right.value(row)),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            ))
+        }
+        DataType::Int32 => {
+            let left = left_array.as_primitive::<Int32Type>();
+            let right = right_array.as_primitive::<Int32Type>();
+            Ok(BooleanArray::from(
+                (0..batch.num_rows())
+                    .map(|row| {
+                        Some(
+                            !left.is_null(row)
+                                && !right.is_null(row)
+                                && cmp_ord(op, &left.value(row), &right.value(row)),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            ))
+        }
+        DataType::Date32 => {
+            let left = left_array.as_primitive::<Date32Type>();
+            let right = right_array.as_primitive::<Date32Type>();
+            Ok(BooleanArray::from(
+                (0..batch.num_rows())
+                    .map(|row| {
+                        Some(
+                            !left.is_null(row)
+                                && !right.is_null(row)
+                                && cmp_ord(op, &left.value(row), &right.value(row)),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            ))
+        }
+        DataType::Utf8 => {
+            let left = left_array
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .ok_or_else(|| SampleError::Arrow("expected utf8".into()))?;
+            let right = right_array
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .ok_or_else(|| SampleError::Arrow("expected utf8".into()))?;
+            Ok(BooleanArray::from(
+                (0..batch.num_rows())
+                    .map(|row| {
+                        Some(
+                            !left.is_null(row)
+                                && !right.is_null(row)
+                                && cmp_ord(op, left.value(row), right.value(row)),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            ))
+        }
+        other => Err(SampleError::UnsupportedPredicate(format!(
+            "unsupported column compare type {other}"
+        ))),
+    }
+}
+
+fn like_column(
+    batch: &RecordBatch,
+    column: &str,
+    pattern: &str,
+    negated: bool,
+    case_insensitive: bool,
+) -> Result<BooleanArray, SampleError> {
+    let array = batch
+        .column_by_name(column)
+        .ok_or_else(|| SampleError::MissingColumn(column.to_string()))?;
+    let array = array
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .ok_or_else(|| SampleError::UnsupportedPredicate(format!("LIKE on non-utf8 '{column}'")))?;
+    Ok(BooleanArray::from(
+        array
+            .iter()
+            .map(|cell| {
+                let matched = cell.is_some_and(|value| {
+                    sql_like_match(value, pattern, case_insensitive)
+                });
+                Some(if negated { !matched } else { matched })
+            })
+            .collect::<Vec<_>>(),
+    ))
+}
+
+fn cmp_ord<T: PartialOrd + ?Sized>(op: SampleCompareOp, left: &T, right: &T) -> bool {
+    match op {
+        SampleCompareOp::Eq => left == right,
+        SampleCompareOp::NotEq => left != right,
+        SampleCompareOp::Lt => left < right,
+        SampleCompareOp::LtEq => left <= right,
+        SampleCompareOp::Gt => left > right,
+        SampleCompareOp::GtEq => left >= right,
+    }
+}
+
+/// SQL LIKE with `%` (any run) and `_` (one char). No escape character.
+fn sql_like_match(text: &str, pattern: &str, case_insensitive: bool) -> bool {
+    if case_insensitive {
+        sql_like_match_chars(
+            &text.to_lowercase().chars().collect::<Vec<_>>(),
+            &pattern.to_lowercase().chars().collect::<Vec<_>>(),
+        )
+    } else {
+        sql_like_match_chars(
+            &text.chars().collect::<Vec<_>>(),
+            &pattern.chars().collect::<Vec<_>>(),
+        )
+    }
+}
+
+fn sql_like_match_chars(text: &[char], pattern: &[char]) -> bool {
+    let mut t = 0usize;
+    let mut p = 0usize;
+    let mut star_p = None;
+    let mut star_t = 0usize;
+    while t < text.len() {
+        if p < pattern.len() && (pattern[p] == '_' || pattern[p] == text[t]) {
+            t += 1;
+            p += 1;
+        } else if p < pattern.len() && pattern[p] == '%' {
+            star_p = Some(p);
+            star_t = t;
+            p += 1;
+        } else if let Some(sp) = star_p {
+            p = sp + 1;
+            star_t += 1;
+            t = star_t;
+        } else {
+            return false;
+        }
+    }
+    while p < pattern.len() && pattern[p] == '%' {
+        p += 1;
+    }
+    p == pattern.len()
 }
 
 fn hash_equijoin(
@@ -489,14 +771,85 @@ mod tests {
 
         let filtered = filter_relation(
             &relation,
-            &SamplePredicate::EqColumnLiteral {
+            &SamplePredicate::CompareColumnLiteral {
                 column: "id".into(),
+                op: SampleCompareOp::Eq,
                 value: SampleScalar::Int64(2),
             },
         )
         .unwrap();
         assert_eq!(filtered.num_rows(), 2);
         assert_eq!(filtered.estimated_rows(), 200.0);
+        assert_eq!(
+            match_fraction(
+                &relation,
+                &SamplePredicate::CompareColumnLiteral {
+                    column: "id".into(),
+                    op: SampleCompareOp::Eq,
+                    value: SampleScalar::Int64(2),
+                },
+            )
+            .unwrap(),
+            0.5
+        );
+    }
+
+    #[test]
+    fn filters_date32_range_and_reports_zero_match_fraction() {
+        use arrow_array::Date32Array;
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "d",
+            DataType::Date32,
+            true,
+        )]));
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![Arc::new(Date32Array::from(vec![
+                Some(10),
+                Some(20),
+                Some(30),
+                Some(40),
+            ]))],
+        )
+        .unwrap();
+        let sample =
+            TableSample::try_new(schema, vec![batch], 4, 400, SampleProvenance::Past).unwrap();
+        let relation = SampleRelation::from_table_sample(&sample, &[]).unwrap();
+        let predicate = SamplePredicate::CompareColumnLiteral {
+            column: "d".into(),
+            op: SampleCompareOp::Lt,
+            value: SampleScalar::Date32(25),
+        };
+        assert_eq!(match_fraction(&relation, &predicate).unwrap(), 0.5);
+        let none = SamplePredicate::CompareColumnLiteral {
+            column: "d".into(),
+            op: SampleCompareOp::Gt,
+            value: SampleScalar::Date32(100),
+        };
+        assert_eq!(match_fraction(&relation, &none).unwrap(), 0.0);
+    }
+
+    #[test]
+    fn like_matches_percent_wildcards() {
+        let relation = SampleRelation::from_table_sample(
+            &TableSample::try_new(
+                batch(&[1, 2, 3], &["alpha", "beta", "alp"]).schema(),
+                vec![batch(&[1, 2, 3], &["alpha", "beta", "alp"])],
+                3,
+                30,
+                SampleProvenance::Past,
+            )
+            .unwrap(),
+            &[],
+        )
+        .unwrap();
+        let predicate = SamplePredicate::Like {
+            column: "name".into(),
+            pattern: "alp%".into(),
+            negated: false,
+            case_insensitive: false,
+        };
+        assert_eq!(match_fraction(&relation, &predicate).unwrap(), 2.0 / 3.0);
     }
 
     #[test]
