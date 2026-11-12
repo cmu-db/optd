@@ -3,7 +3,7 @@
 //! These helpers are intentionally IR-agnostic: callers translate planner expressions into
 //! [`SamplePredicate`] / join key names before invoking them.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use arrow_array::cast::AsArray;
@@ -189,6 +189,44 @@ pub fn filter_relation(
         lower: 0.0,
         upper: relation.upper,
     })
+}
+
+/// Fraction of `left` sample rows whose equi-key appears in the `right` sample key set.
+///
+/// Used for Rusu-style semi/anti **existence** estimates: unlike inclusion NDV formulas, this
+/// observes actual key overlap in the samples (false negatives for match are possible when the
+/// right sample misses a key that exists in the full right table).
+pub fn key_presence_match_fraction(
+    left: &SampleRelation,
+    right: &SampleRelation,
+    left_keys: &[String],
+    right_keys: &[String],
+) -> Result<f64, SampleError> {
+    if left_keys.len() != right_keys.len() || left_keys.is_empty() {
+        return Err(SampleError::InvalidJoinKeys);
+    }
+    let right_batch = concat_or_empty(right)?;
+    let mut right_keys_set = HashSet::new();
+    for row in 0..right_batch.num_rows() {
+        if let Some(key) = row_key(&right_batch, right_keys, row)? {
+            right_keys_set.insert(key);
+        }
+    }
+    let left_batch = concat_or_empty(left)?;
+    let total = left_batch.num_rows();
+    if total == 0 {
+        return Ok(0.0);
+    }
+    let mut matches = 0usize;
+    for row in 0..total {
+        let Some(key) = row_key(&left_batch, left_keys, row)? else {
+            continue;
+        };
+        if right_keys_set.contains(&key) {
+            matches += 1;
+        }
+    }
+    Ok(matches as f64 / total as f64)
 }
 
 /// Fraction of sample rows matching `predicate` (`matches / n`). Returns `0.0` when `n == 0` or
@@ -850,6 +888,28 @@ mod tests {
             case_insensitive: false,
         };
         assert_eq!(match_fraction(&relation, &predicate).unwrap(), 2.0 / 3.0);
+    }
+
+    #[test]
+    fn key_presence_match_fraction_counts_left_rows_with_right_keys() {
+        let left = SampleRelation {
+            schema: batch(&[1, 2, 3, 4], &["a", "b", "c", "d"]).schema(),
+            batches: vec![batch(&[1, 2, 3, 4], &["a", "b", "c", "d"])],
+            scale: 1.0,
+            lower: 4.0,
+            upper: 4.0,
+        };
+        let right = SampleRelation {
+            schema: batch(&[1, 2], &["x", "y"]).schema(),
+            batches: vec![batch(&[1, 2], &["x", "y"])],
+            scale: 1.0,
+            lower: 2.0,
+            upper: 2.0,
+        };
+        assert_eq!(
+            key_presence_match_fraction(&left, &right, &["id".into()], &["id".into()]).unwrap(),
+            0.5
+        );
     }
 
     #[test]

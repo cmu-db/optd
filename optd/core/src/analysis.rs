@@ -2261,6 +2261,24 @@ fn map_profile(
     output
 }
 
+/// Distinct count for one grouping key: prefer a live HLL sketch when present, else profile NDV.
+fn grouping_key_distinct(profile: &ColumnProfile, input_rows: f64) -> Estimate {
+    if let Some(hll) = profile
+        .sketches
+        .as_ref()
+        .and_then(|sketches| sketches.distinct_values.as_ref())
+    {
+        let estimated = hll.estimate().min(profile.frequency.value).min(input_rows);
+        return Estimate {
+            value: estimated,
+            lower: Some(0.0),
+            upper: Some(profile.frequency.value.min(input_rows)),
+            source: EstimateSource::Sketch,
+        };
+    }
+    profile.distinct.clone()
+}
+
 fn aggregation_profile(
     input: &CardinalityProfile,
     input_facts: &LogicalFacts,
@@ -2321,7 +2339,7 @@ fn aggregation_profile(
                             input.rows.upper,
                         )
                     },
-                    |profile| profile.distinct.clone(),
+                    |profile| grouping_key_distinct(profile, input.rows.value),
                 )
             } else {
                 Estimate::derived(
@@ -3382,10 +3400,18 @@ fn equality_edge_estimate(
     } else {
         (edge.right_ndv.value, edge.left_ndv.value)
     };
-    let left_distinct =
-        effective_join_distinct(left, left_profile, left_base, catalog).max(left_distinct_hint);
-    let right_distinct =
-        effective_join_distinct(right, right_profile, right_base, catalog).max(right_distinct_hint);
+    // Postgres eqjoinsel_semi clamps NDVs by the represented population (Leis et al. cite this
+    // inclusion machinery). Inflated NDVs otherwise force near-certain matches and crush anti joins.
+    let left_distinct = effective_join_distinct(left, left_profile, left_base, catalog)
+        .max(left_distinct_hint)
+        .min(left_profile.frequency.value)
+        .min(left.rows.value)
+        .max(0.0);
+    let right_distinct = effective_join_distinct(right, right_profile, right_base, catalog)
+        .max(right_distinct_hint)
+        .min(right_profile.frequency.value)
+        .min(right.rows.value)
+        .max(0.0);
     let intersection =
         estimated_distinct_intersection(left_profile, right_profile, left_distinct, right_distinct);
     let left_non_null = join_column_non_null_fraction(left_column, left, right);
@@ -3461,25 +3487,33 @@ fn equality_edge_estimate(
         equal_non_null
     };
     let pair_selectivity = sketch_selectivity.unwrap_or(uniform_pair_selectivity);
-    let uniform_non_null_match_probability = if left_distinct <= 0.0 {
+    // Leis/Postgres inclusion: P(match) = nn_L * min(dL,dR) / dL when domains nest.
+    let inclusion_non_null_match_probability = if left_distinct <= 0.0 {
         0.0
     } else {
         left_non_null * intersection.distinct / left_distinct
     };
-    let non_null_match_probability = if null_safe {
-        uniform_non_null_match_probability
-    } else {
-        sketch_left_match_probability(
-            first,
-            second,
-            left,
-            right,
-            intersection.distinct,
-            left_distinct,
-        )
-        .map(|sketch| sketch.max(uniform_non_null_match_probability))
-        .unwrap_or(uniform_non_null_match_probability)
-    };
+    let sketch_match = (!null_safe)
+        .then(|| {
+            sketch_left_match_probability(
+                first,
+                second,
+                left,
+                right,
+                intersection.distinct,
+                left_distinct,
+            )
+        })
+        .flatten();
+    // Rusu-style: when both base tables have catalog samples, observe key presence instead of
+    // trusting inclusion (which systematically underestimates NOT EXISTS / anti when domains
+    // “overlap” in NDV but not in value sets).
+    let sample_match = (!null_safe)
+        .then(|| sample_key_match_probability(left_base, right_base, catalog))
+        .flatten();
+    let non_null_match_probability = sample_match
+        .or_else(|| sketch_match.map(|sketch| sketch.max(inclusion_non_null_match_probability)))
+        .unwrap_or(inclusion_non_null_match_probability);
     EqualityEdgeEstimate {
         pair_selectivity: pair_selectivity.clamp(0.0, 1.0),
         left_match_probability: (non_null_match_probability + null_match_probability)
@@ -3495,6 +3529,31 @@ fn equality_edge_estimate(
         }),
         domains_disjoint: false,
     }
+}
+
+/// Rusu-inspired existence probability from catalog table samples (key presence in the right sample).
+fn sample_key_match_probability(
+    left_base: Option<&BaseColumn>,
+    right_base: Option<&BaseColumn>,
+    catalog: Option<&dyn Catalog>,
+) -> Option<f64> {
+    let (catalog, left_base, right_base) = match (catalog, left_base, right_base) {
+        (Some(catalog), Some(left_base), Some(right_base)) => (catalog, left_base, right_base),
+        _ => return None,
+    };
+    let left_sample = catalog.table_samples(&left_base.table).ok().flatten()?;
+    let right_sample = catalog.table_samples(&right_base.table).ok().flatten()?;
+    let left_relation = optd_sampling::SampleRelation::from_table_sample(&left_sample, &[]).ok()?;
+    let right_relation =
+        optd_sampling::SampleRelation::from_table_sample(&right_sample, &[]).ok()?;
+    optd_sampling::key_presence_match_fraction(
+        &left_relation,
+        &right_relation,
+        std::slice::from_ref(&left_base.name),
+        std::slice::from_ref(&right_base.name),
+    )
+    .ok()
+    .map(|value| value.clamp(0.0, 1.0))
 }
 
 fn oriented_join_columns<'a>(
@@ -8191,6 +8250,80 @@ mod tests {
     }
 
     #[test]
+    fn aggregation_prefers_hll_sketch_ndv_over_catalog_distinct() {
+        // Catalog NDV can lag behind a live query-local HLL. Grouping should prefer the sketch.
+        let mut ctx = QueryContext::new();
+        let key = ColumnData::new("key", DataType::Int64).add(&mut ctx);
+        let count = ColumnData::new("count", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("users"),
+            columns: vec![key],
+        })
+        .add(&mut ctx);
+        let key_ref = ExprData::ColumnRef(key).add(&mut ctx);
+        let aggregation = OperatorData::Aggregation(Aggregation {
+            keys: vec![key_ref],
+            aggregates: vec![(count, AggregateExpr::CountStar)],
+            input: scan,
+        })
+        .add(&mut ctx);
+
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        catalog
+            .create_table(TableRef::bare("users"), schema(), None)
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                TableRef::bare("users"),
+                TableStatistics {
+                    row_count: Some(100),
+                    size_bytes: None,
+                    column_statistics: [(
+                        "key".to_string(),
+                        ColumnStatistics {
+                            lower_bound: None,
+                            upper_bound: None,
+                            frequency: Some(100),
+                            distinct: Some(2),
+                            sketches: None,
+                            distribution: None,
+                        },
+                    )]
+                    .into_iter()
+                    .collect(),
+                    column_groups: Vec::new(),
+                    constraints: Default::default(),
+                },
+            )
+            .unwrap();
+
+        let mut sketches = ColumnSketches::new(100).hll();
+        for value in 1..=20 {
+            sketches.observe(&ScalarValue::Int64(value));
+        }
+        let mut analyses = AnalysisContext::new(catalog);
+        analyses
+            .set_column_sketches(TableRef::bare("users"), "key", sketches)
+            .unwrap();
+
+        let scan_profile = analyses
+            .get::<CardinalityEstimationV1>(&ctx, scan)
+            .unwrap();
+        assert_eq!(scan_profile.columns[&key].distinct.value, 2.0);
+        assert!(scan_profile.columns[&key].sketches.is_some());
+
+        let profile = analyses
+            .get::<CardinalityEstimationV1>(&ctx, aggregation)
+            .unwrap();
+        assert!(
+            (profile.rows.value - 20.0).abs() < 5.0,
+            "expected ~20 groups from HLL, got {}",
+            profile.rows.value
+        );
+        assert_ne!(profile.rows.value, 2.0);
+    }
+
+    #[test]
     fn aggregation_counts_equivalent_grouping_keys_once() {
         let mut ctx = QueryContext::new();
         let first = ColumnData::new("first", DataType::Int64).add(&mut ctx);
@@ -9013,6 +9146,123 @@ mod tests {
         assert_eq!(nullable_anti.rows.value, 50.0);
         assert_eq!(nullable_anti.columns[&left_key].frequency.value, 0.0);
         assert_eq!(nullable_anti.columns[&left_key].distinct.value, 0.0);
+    }
+
+    #[test]
+    fn anti_join_uses_sample_key_presence_over_inclusion_ndv() {
+        use arrow_array::{Int64Array, RecordBatch};
+        use optd_sampling::{SampleProvenance, TableSample};
+
+        // Inclusion with dL=4, dR=100 would claim every left key matches. Samples show only
+        // half of left keys appear on the right (Rusu-style presence), so anti ≈ 50%.
+        let mut ctx = QueryContext::new();
+        let left_key = ColumnData::new("c_custkey", DataType::Int64).add(&mut ctx);
+        let right_key = ColumnData::new("o_custkey", DataType::Int64).add(&mut ctx);
+        let predicate = equality_expr(&mut ctx, left_key, right_key);
+
+        let left_schema =
+            Arc::new(Schema::new(vec![Field::new("c_custkey", DataType::Int64, false)]));
+        let right_schema =
+            Arc::new(Schema::new(vec![Field::new("o_custkey", DataType::Int64, false)]));
+        let left_batch = RecordBatch::try_new(
+            left_schema.clone(),
+            vec![Arc::new(Int64Array::from(vec![1_i64, 2, 3, 4]))],
+        )
+        .unwrap();
+        let right_batch = RecordBatch::try_new(
+            right_schema.clone(),
+            vec![Arc::new(Int64Array::from(vec![1_i64, 2, 1, 2]))],
+        )
+        .unwrap();
+        let left_samples = TableSample::try_new(
+            left_schema.clone(),
+            vec![left_batch],
+            4,
+            4,
+            SampleProvenance::Past,
+        )
+        .unwrap();
+        let right_samples = TableSample::try_new(
+            right_schema.clone(),
+            vec![right_batch],
+            4,
+            100,
+            SampleProvenance::Past,
+        )
+        .unwrap();
+
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        catalog
+            .create_table(TableRef::bare("customer"), left_schema, None)
+            .unwrap();
+        catalog
+            .create_table(TableRef::bare("orders"), right_schema, None)
+            .unwrap();
+        catalog
+            .set_table_samples(TableRef::bare("customer"), left_samples)
+            .unwrap();
+        catalog
+            .set_table_samples(TableRef::bare("orders"), right_samples)
+            .unwrap();
+
+        let left = CardinalityProfile::new(
+            Estimate::exact(4.0),
+            [(
+                left_key,
+                ColumnProfile {
+                    lower_bound: None,
+                    upper_bound: None,
+                    frequency: Estimate::exact(4.0),
+                    distinct: Estimate::exact(4.0),
+                    value: Some(ValueId::Base(BaseColumn {
+                        table: TableRef::bare("customer"),
+                        name: "c_custkey".into(),
+                        source: left_key,
+                    })),
+                    sketches: None,
+                    distribution: None,
+                },
+            )]
+            .into_iter()
+            .collect(),
+        );
+        let right = CardinalityProfile::new(
+            Estimate::exact(100.0),
+            [(
+                right_key,
+                ColumnProfile {
+                    lower_bound: None,
+                    upper_bound: None,
+                    frequency: Estimate::exact(100.0),
+                    // Inflated NDV would force inclusion match ≈ 1 without samples.
+                    distinct: Estimate::exact(100.0),
+                    value: Some(ValueId::Base(BaseColumn {
+                        table: TableRef::bare("orders"),
+                        name: "o_custkey".into(),
+                        source: right_key,
+                    })),
+                    sketches: None,
+                    distribution: None,
+                },
+            )]
+            .into_iter()
+            .collect(),
+        );
+
+        let anti = join_profile_from_predicate_with_config(
+            &left,
+            &right,
+            JoinType::LeftAnti,
+            predicate,
+            &ctx,
+            &CardinalityEstimationConfig::default(),
+            Some(catalog.as_ref()),
+        );
+        assert!(
+            (anti.rows.value - 2.0).abs() < 1e-6,
+            "expected anti rows 2 from sample presence 0.5, got {}",
+            anti.rows.value
+        );
     }
 
     #[test]

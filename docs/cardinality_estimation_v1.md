@@ -86,8 +86,10 @@ instead of only capping the old NDV by output rows.
 
 `Aggregation` estimates group count from grouping-key distinct counts, capped by input rows.
 Semantic uniqueness wins first. Otherwise, the estimator uses the largest compatible joint NDV once
-and multiplies single-column NDVs only for uncovered keys. Grouping columns preserve adjusted
-profiles; aggregate output columns start conservative except for simple count-like bounds.
+and multiplies single-column NDVs only for uncovered keys. Per-key distinct prefers a live HLL sketch
+when the input profile still carries one (catalog NDV alone can lag); filters/joins that change the
+population still invalidate sketches. Grouping columns preserve adjusted profiles; aggregate output
+columns start conservative except for simple count-like bounds.
 
 `Sort` preserves profiles.
 
@@ -109,24 +111,27 @@ multiplying transitively redundant selectivities. This avoids over-penalizing ch
 `A.x = B.x` and `B.x = C.x`.
 
 Inner-join pair selectivity and semi/anti existence probability are separate estimates. For a left
-semi/anti equality, directional coverage is estimated as:
+semi/anti equality, directional coverage starts from Leis/Postgres inclusion:
 
 ```text
 left_non_null_fraction * intersection_ndv / left_ndv
 ```
 
-The general fallback uses containment (`intersection_ndv = min(left_ndv, right_ndv)`). When
-an equality match has an estimated conditional fanout `f` and residual predicates have pair
-selectivity `r`, semi/anti survival uses `1 - (1 - r)^f`, rather than incorrectly multiplying the
-match probability by `r`. Compatible ordered ranges detect disjoint domains and estimate numeric/date overlap under uniformity.
-SpaceSaving common values refine known matched left-row mass without letting duplicate right rows
-inflate coverage; uncertain counters cannot lower the uniform baseline. Semi output key profiles are
-capped by the intersection domain, and pure single-key anti joins propagate complementary unmatched
-frequency and NDV. Catalog unique/FK assertions provide stronger estimates only while the required
-base population is complete. Direct-column composite inner equalities may consume one compatible
-joint NDV from either input, with normalized edge orientation and per-edge fallback only for
-uncovered equalities. Histograms, samples, tuple-frequency statistics, and intersection-capable
-sketches remain future work.
+with NDVs clamped to non-null frequency and row count. When both join keys resolve to base tables
+with catalog samples, Rusu-style key-presence sampling overrides inclusion
+(`P(match) ≈ fraction of left sample rows whose key appears in the right sample key set`).
+SpaceSaving sketch match can raise inclusion when samples are unavailable. When an equality match
+has estimated conditional fanout `f` and residual predicates have pair selectivity `r`, semi/anti
+survival uses `1 - (1 - r)^f`, rather than incorrectly multiplying the match probability by `r`.
+Compatible ordered ranges detect disjoint domains and estimate numeric/date overlap under
+uniformity. SpaceSaving common values refine known matched left-row mass without letting duplicate
+right rows inflate coverage; uncertain counters cannot lower the uniform baseline. Semi output key
+profiles are capped by the intersection domain, and pure single-key anti joins propagate
+complementary unmatched frequency and NDV. Catalog unique/FK assertions provide stronger estimates
+only while the required base population is complete. Direct-column composite inner equalities may
+consume one compatible joint NDV from either input, with normalized edge orientation and per-edge
+fallback only for uncovered equalities. Multi-column histograms, joint NDVs beyond schema-prefix
+HLLs, and intersection-capable sketches remain future work.
 
 Transient or redundant equality edges should be treated specially for costing.
 They may need to remain in the IR for execution or backend behavior, but CE
@@ -175,6 +180,8 @@ minimum, maintaining `lower <= value <= upper`.
 - [x] Collect query-local HLLs for leading logical-schema prefixes through length five.
 - [x] Consume population-safe joint NDV for grouping and direct composite inner equalities.
 - [x] Replace uniform range overlap with histograms/samples (leaf samples + MCV/hist; progressive sample ANDs).
+- [x] Prefer catalog-sample key presence for semi/anti match probability (Rusu); clamp inclusion NDVs.
+- [x] Prefer live HLL sketch NDV for aggregation grouping keys when sketches survive on the input.
 - [ ] Add catalog **joint NDVs** beyond leading schema-prefix HLLs (correlated filters/joins/groupby).
 - [ ] Add **multi-column histograms** (or sampled column groups) for residual/correlated predicates.
 - [ ] Persist and refresh compatible sketches through a production catalog statistics provider.

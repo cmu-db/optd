@@ -38,6 +38,9 @@ building intermediate DP states.
 - Multiple equalities connecting the same classes should pick the strongest
   containment domain, not multiply all predicates.
 - Semi/anti joins should use match probability, not inner-join output rows.
+- Prefer Rusu-style sample key presence over inclusion NDV when both sides have catalog samples;
+  clamp inclusion NDVs to represented population (Postgres / Leis).
+- Aggregation grouping should prefer live HLL NDV when sketches remain on the input profile.
 - Outer joins need preserved-side lower bounds without losing the expected inner-match estimate,
   and must not propagate ON-condition equality across null-extended rows.
 
