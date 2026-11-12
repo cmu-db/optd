@@ -424,6 +424,7 @@ mod tests {
                     distinct: Estimate::exact(distinct),
                     value: None,
                     sketches: None,
+                    distribution: None,
                 },
             )]
             .into_iter()

@@ -1,5 +1,6 @@
 pub mod cardinality_regression;
 pub mod config;
+mod distribution_stats;
 pub mod explain_udfs;
 pub mod from_df_logical;
 pub mod profiling;

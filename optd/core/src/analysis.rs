@@ -348,6 +348,9 @@ pub struct ColumnProfile {
     /// Base-population sketches. Operators that change the represented population invalidate this
     /// field unless they can derive a sound replacement.
     pub sketches: Option<Arc<ColumnSketches>>,
+    /// Catalog MCV / histogram for the base population, retained only while the population is
+    /// unchanged (same invalidation policy as sketches).
+    pub distribution: Option<Arc<crate::ColumnDistributionStatistics>>,
 }
 
 impl ColumnProfile {
@@ -363,6 +366,7 @@ impl ColumnProfile {
             distinct: Estimate::derived(rows.value.min(ndv_cap), Some(0.0), rows.upper),
             value: None,
             sketches: None,
+            distribution: None,
         }
     }
 
@@ -396,6 +400,7 @@ impl ColumnProfile {
             .distinct
             .cap(self.frequency.value, EstimateSource::Derived);
         self.sketches = None;
+        self.distribution = None;
     }
 }
 
@@ -2042,6 +2047,7 @@ fn column_profile_from_stats(
         distinct,
         value: None,
         sketches,
+        distribution: stats.distribution.clone().map(Arc::new),
     }
 }
 
@@ -2067,6 +2073,7 @@ fn default_scan_column_profile(
         distinct,
         value: None,
         sketches,
+        distribution: None,
     }
 }
 
@@ -2175,6 +2182,7 @@ fn const_scan_profile(data: &crate::ConstScan, ctx: &QueryContext) -> Cardinalit
                 distinct: Estimate::exact(distinct),
                 value: None,
                 sketches: None,
+                distribution: None,
             },
         );
     }
@@ -2347,6 +2355,7 @@ fn aggregation_profile(
                 distinct: group_rows.cap(group_rows.value, EstimateSource::Derived),
                 value: None,
                 sketches: None,
+                distribution: None,
             },
             AggregateExpr::Func {
                 func: AggregateFunction::Count,
@@ -2361,6 +2370,7 @@ fn aggregation_profile(
                 distinct: group_rows.cap(group_rows.value, EstimateSource::Derived),
                 value: None,
                 sketches: None,
+                distribution: None,
             },
             _ => {
                 let mut profile =
@@ -2517,6 +2527,7 @@ fn scale_profile(
                 );
             }
             output.sketches = None;
+            output.distribution = None;
             (column, output)
         })
         .collect();
@@ -2576,6 +2587,7 @@ pub(crate) fn cross_product_profile(
             .distinct
             .cap(output.frequency.value, EstimateSource::Derived);
         output.sketches = None;
+            output.distribution = None;
         columns.insert(column, output);
     }
     for (&column, profile) in &right.columns {
@@ -2588,6 +2600,7 @@ pub(crate) fn cross_product_profile(
             .distinct
             .cap(output.frequency.value, EstimateSource::Derived);
         output.sketches = None;
+            output.distribution = None;
         columns.insert(column, output);
     }
     CardinalityProfile {
@@ -2780,6 +2793,7 @@ fn join_profile_with_selectivity_and_classes(
                     ),
                     value: None,
                     sketches: None,
+                    distribution: None,
                 },
             );
             profile
@@ -2822,6 +2836,7 @@ fn single_join_profile(
             .distinct
             .cap(output.frequency.value, EstimateSource::Derived);
         output.sketches = None;
+            output.distribution = None;
         columns.insert(column, output);
     }
     CardinalityProfile {
@@ -2992,6 +3007,7 @@ fn derive_join_side_columns(
                 .distinct
                 .cap(output.frequency.value, EstimateSource::Derived);
             output.sketches = None;
+            output.distribution = None;
             (column, output)
         })
         .collect()
@@ -4110,6 +4126,9 @@ fn binary_selectivity(
 }
 
 fn frequent_value_selectivity(profile: &ColumnProfile, literal: &ScalarValue) -> Option<f64> {
+    if let Some(selectivity) = mcv_equality_selectivity(profile, literal) {
+        return Some(selectivity);
+    }
     let encoded = EncodedScalarValue::from_scalar(literal)?;
     let sketches = profile.sketches.as_ref()?;
     let frequent = sketches.frequent_values.as_ref()?;
@@ -4131,6 +4150,139 @@ fn frequent_value_selectivity(profile: &ColumnProfile, literal: &ScalarValue) ->
     let residual_rows = sketches.population_rows.saturating_sub(tracked_rows) as f64;
     let residual_distinct = (profile.distinct.value - frequent.entries().len() as f64).max(1.0);
     Some((residual_rows / residual_distinct / population).clamp(0.0, 1.0))
+}
+
+fn mcv_equality_selectivity(profile: &ColumnProfile, literal: &ScalarValue) -> Option<f64> {
+    let distribution = profile.distribution.as_ref()?;
+    let mcv = distribution.most_common_values.as_ref()?;
+    let population = profile
+        .sketches
+        .as_ref()
+        .map(|sketches| sketches.population_rows as f64)
+        .unwrap_or(profile.frequency.value)
+        .max(1.0);
+    if let Some(entry) = mcv.entries().iter().find(|entry| &entry.value == literal) {
+        return Some((entry.frequency as f64 / population).clamp(0.0, 1.0));
+    }
+    // Complete MCV means every non-null value is listed; a miss is exact zero.
+    if matches!(mcv.completeness(), crate::StatisticsCompleteness::Complete) {
+        return Some(0.0);
+    }
+    None
+}
+
+/// Histogram-based conditional selectivity among non-null residual (+ MCV) rows.
+fn histogram_range_selectivity(
+    profile: &ColumnProfile,
+    literal: &ScalarValue,
+    op: BinaryOp,
+) -> Option<f64> {
+    let distribution = profile.distribution.as_ref()?;
+    let mut selected = 0.0_f64;
+    let mut total = 0.0_f64;
+
+    if let Some(mcv) = distribution.most_common_values.as_ref() {
+        for entry in mcv.entries() {
+            let freq = entry.frequency as f64;
+            total += freq;
+            if scalar_satisfies_compare(&entry.value, literal, op) {
+                selected += freq;
+            }
+        }
+    }
+    if let Some(histogram) = distribution.histogram.as_ref() {
+        for bucket in histogram.buckets() {
+            let freq = bucket.frequency as f64;
+            total += freq;
+            selected += bucket_range_overlap_rows(bucket, literal, op)?;
+        }
+    }
+    if total <= 0.0 {
+        return None;
+    }
+    Some((selected / total).clamp(0.0, 1.0))
+}
+
+fn scalar_satisfies_compare(value: &ScalarValue, literal: &ScalarValue, op: BinaryOp) -> bool {
+    let Some(order) = crate::catalog::scalar_order(value, literal) else {
+        return false;
+    };
+    match op {
+        BinaryOp::Lt => order.is_lt(),
+        BinaryOp::LtEq => order.is_le(),
+        BinaryOp::Gt => order.is_gt(),
+        BinaryOp::GtEq => order.is_ge(),
+        BinaryOp::Eq => order.is_eq(),
+        BinaryOp::NotEq => !order.is_eq(),
+        _ => false,
+    }
+}
+
+fn bucket_range_overlap_rows(
+    bucket: &crate::HistogramBucket,
+    literal: &ScalarValue,
+    op: BinaryOp,
+) -> Option<f64> {
+    let freq = bucket.frequency as f64;
+    let lower = &bucket.lower_bound;
+    let upper = &bucket.upper_bound;
+    // Point bucket: exact compare.
+    if crate::catalog::scalar_order(lower, upper).is_some_and(|order| order.is_eq()) {
+        return Some(if scalar_satisfies_compare(lower, literal, op) {
+            freq
+        } else {
+            0.0
+        });
+    }
+    let lower_f = scalar_to_f64(lower)?;
+    let upper_f = scalar_to_f64(upper)?;
+    let lit_f = scalar_to_f64(literal)?;
+    if upper_f <= lower_f {
+        return Some(if scalar_satisfies_compare(lower, literal, op) {
+            freq
+        } else {
+            0.0
+        });
+    }
+    let width = upper_f - lower_f;
+    let fraction = match op {
+        BinaryOp::Lt => ((lit_f - lower_f) / width).clamp(0.0, 1.0),
+        BinaryOp::LtEq => ((lit_f - lower_f) / width).clamp(0.0, 1.0),
+        BinaryOp::Gt => ((upper_f - lit_f) / width).clamp(0.0, 1.0),
+        BinaryOp::GtEq => ((upper_f - lit_f) / width).clamp(0.0, 1.0),
+        _ => return None,
+    };
+    // Buckets wholly on one side of the literal.
+    let wholly = match op {
+        BinaryOp::Lt | BinaryOp::LtEq
+            if crate::catalog::scalar_order(upper, literal).is_some_and(|o| o.is_lt()) =>
+        {
+            1.0
+        }
+        BinaryOp::Lt if crate::catalog::scalar_order(lower, literal).is_some_and(|o| !o.is_lt()) => {
+            0.0
+        }
+        BinaryOp::LtEq
+            if crate::catalog::scalar_order(lower, literal).is_some_and(|o| o.is_gt()) =>
+        {
+            0.0
+        }
+        BinaryOp::Gt | BinaryOp::GtEq
+            if crate::catalog::scalar_order(lower, literal).is_some_and(|o| o.is_gt()) =>
+        {
+            1.0
+        }
+        BinaryOp::Gt if crate::catalog::scalar_order(upper, literal).is_some_and(|o| !o.is_gt()) => {
+            0.0
+        }
+        BinaryOp::GtEq
+            if crate::catalog::scalar_order(upper, literal).is_some_and(|o| o.is_lt()) =>
+        {
+            0.0
+        }
+        _ => fraction,
+    };
+    Some(freq * wholly)
 }
 
 fn value_restricted_filter_column(
@@ -4254,6 +4406,9 @@ fn range_selectivity(
     op: BinaryOp,
     config: &CardinalityEstimationConfig,
 ) -> Estimate {
+    if let Some(selectivity) = histogram_range_selectivity(profile, literal, op) {
+        return Estimate::derived(selectivity, Some(0.0), Some(1.0));
+    }
     let Some(min) = profile.lower_bound.as_ref().and_then(scalar_to_f64) else {
         return Estimate::derived(config.range_fallback_selectivity, Some(0.0), Some(1.0));
     };
@@ -7059,7 +7214,7 @@ mod tests {
                             frequency: Some(100),
                             distinct: Some(100),
                                                         sketches: None,
-                            distribution: None,
+distribution: None,
                         },
                     )]
                     .into_iter()
@@ -7122,7 +7277,7 @@ mod tests {
                             frequency: Some(100),
                             distinct: Some(100),
                                                         sketches: None,
-                            distribution: None,
+distribution: None,
                         },
                     )]
                     .into_iter()
@@ -7525,7 +7680,7 @@ mod tests {
                             frequency: Some(10),
                             distinct: Some(7),
                                                         sketches: None,
-                            distribution: None,
+distribution: None,
                         },
                     )]
                     .into_iter()
@@ -7618,7 +7773,7 @@ mod tests {
                             frequency: Some(10_000),
                             distinct: Some(2_557),
                                                         sketches: None,
-                            distribution: None,
+distribution: None,
                         },
                     )]
                     .into_iter()
@@ -7682,7 +7837,7 @@ mod tests {
                             frequency: Some(100),
                             distinct: Some(10),
                                                         sketches: None,
-                            distribution: None,
+distribution: None,
                         },
                     )]
                     .into_iter()
@@ -7775,7 +7930,7 @@ mod tests {
                                 frequency: Some(1_000),
                                 distinct: Some(100),
                                                                 sketches: None,
-                                distribution: None,
+distribution: None,
                             },
                         ),
                         (
@@ -7786,7 +7941,7 @@ mod tests {
                                 frequency: Some(1_000),
                                 distinct: Some(100),
                                                                 sketches: None,
-                                distribution: None,
+distribution: None,
                             },
                         ),
                     ]
@@ -7971,6 +8126,7 @@ mod tests {
             distinct: Estimate::exact(100.0),
             value: None,
             sketches: None,
+            distribution: None,
         };
         let left = CardinalityProfile::new(
             rows.clone(),
@@ -8416,6 +8572,7 @@ mod tests {
                     distinct: Estimate::exact(100.0),
                     value: None,
                     sketches: None,
+                    distribution: None,
                 },
             )]
             .into_iter()
@@ -8499,6 +8656,7 @@ mod tests {
                             distinct_values: None,
                             frequent_values: Some(uncertain.clone()),
                         })),
+                        distribution: None,
                     },
                 )]
                 .into_iter()
@@ -9198,6 +9356,7 @@ mod tests {
                             distinct_values: None,
                             frequent_values: Some(frequent_values),
                         })),
+                        distribution: None,
                     },
                 )]
                 .into_iter()
@@ -9475,7 +9634,7 @@ mod tests {
                     frequency: Some(observed.len()),
                     distinct: Some(distinct),
                                         sketches: None,
-                    distribution: None,
+distribution: None,
                 },
             )]
             .into_iter()
@@ -9497,7 +9656,7 @@ mod tests {
                     frequency: Some(rows),
                     distinct: Some(distinct),
                                         sketches: None,
-                    distribution: None,
+distribution: None,
                 },
             )]
             .into_iter()
@@ -9530,6 +9689,7 @@ mod tests {
             distinct: Estimate::exact(distinct),
             value: None,
             sketches: None,
+            distribution: None,
         }
     }
 

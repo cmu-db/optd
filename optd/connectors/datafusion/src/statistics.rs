@@ -230,6 +230,7 @@ pub(crate) async fn collect_full_scan_statistics(
             update_test_bounds(&mut lower_bound, &mut upper_bound, value);
             sketches.observe(value);
         }
+        let distribution = crate::distribution_stats::build_column_distribution(&non_null);
         column_statistics.insert(
             field.name().clone(),
             ColumnStatistics {
@@ -237,7 +238,7 @@ pub(crate) async fn collect_full_scan_statistics(
                 upper_bound,
                 frequency: Some(non_null.len()),
                 distinct: Some(exact_distinct.len()),
-                distribution: None,
+                distribution,
                 sketches: Some(sketches),
             },
         );

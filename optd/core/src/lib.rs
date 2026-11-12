@@ -30,7 +30,7 @@ pub use catalog::{
     MAX_HISTOGRAM_BUCKETS, MAX_KEY_COLUMNS, MAX_MOST_COMMON_VALUES, MAX_TABLE_KEYS, MemoryCatalog,
     MostCommonValue, MostCommonValues, NullCountStatistics, ResolvedTableRef,
     StatisticsCompleteness, StatisticsProvenance, TableConstraints, TableId, TableMetadata,
-    TableRef, TableStatistics, UniqueKey, UniqueKeyError,
+    TableRef, TableStatistics, UniqueKey, UniqueKeyError, scalar_order,
 };
 pub use cost::{CostModel, DefaultCostModel, JoinAlgorithmClass, join_algorithm_cost};
 pub use display::{
