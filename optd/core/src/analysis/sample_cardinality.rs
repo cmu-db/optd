@@ -1,47 +1,18 @@
 //! Leaf sample selectivity helpers for [`super::CardinalityEstimationV1`].
 //!
-//! Catalog table samples estimate **scan/selection predicates** (Umbra/Cedar style). Joins always
-//! use classic Selinger/HLL estimation — this module never joins samples.
-
-use std::collections::BTreeMap;
+//! Catalog table samples estimate **selection predicate** selectivity (Umbra/Cedar style).
+//! Column NDVs / sketches / equivalence classes stay on the classic V1 profile path so joins
+//! keep catalog distincts. This module never joins samples.
 
 use optd_sampling::{
-    SampleCompareOp, SamplePredicate, SampleRelation, SampleScalar, filter_relation, match_fraction,
+    SampleCompareOp, SamplePredicate, SampleRelation, SampleScalar, match_fraction,
 };
 
 use crate::{
-    BinaryOp, Column, Expr, ExprData, NaryOp, Operator, OperatorData, QueryContext, ScalarValue,
-    Scan,
+    BinaryOp, Expr, ExprData, NaryOp, Operator, OperatorData, QueryContext, ScalarValue, Scan,
 };
 
-use super::{
-    AnalysisContext, AnalysisError, AnalysisResult, AvailableColumns, CardinalityProfile,
-    ColumnProfile, Estimate,
-};
-
-/// Attempts sample-based estimation for a **leaf scan pipeline** (scan / selection / projection /
-/// rename / output / sort). Returns `Ok(None)` for joins and unsupported fragments so the caller
-/// falls back to classic estimation.
-pub(super) fn try_sample_cardinality(
-    operator: Operator,
-    ctx: &QueryContext,
-    analyses: &mut AnalysisContext,
-) -> AnalysisResult<Option<CardinalityProfile>> {
-    if !sample_eligible(operator, ctx, analyses)? {
-        return Ok(None);
-    }
-    let Some(relation) = evaluate_sample_tree(operator, ctx, analyses)? else {
-        return Ok(None);
-    };
-    let columns = analyses.get::<AvailableColumns>(ctx, operator)?;
-    Ok(Some(profile_from_relation(
-        &relation,
-        columns,
-        analyses
-            .cardinality_estimation_config()
-            .unknown_column_ndv_cap,
-    )))
-}
+use super::{AnalysisContext, AnalysisError, AnalysisResult};
 
 /// Loads a sample relation for a scan-pipeline operator (no joins), for per-conjunct selectivity.
 pub(super) fn try_leaf_sample_relation(
@@ -65,45 +36,6 @@ pub(super) fn sample_conjunct_selectivity(
     match_fraction(relation, &predicate).ok()
 }
 
-fn profile_from_relation(
-    relation: &SampleRelation,
-    columns: impl IntoIterator<Item = Column>,
-    ndv_cap: f64,
-) -> CardinalityProfile {
-    let rows = Estimate::sample(
-        relation.estimated_rows(),
-        Some(relation.lower.max(0.0)),
-        Some(relation.upper.max(relation.estimated_rows()).max(0.0)),
-    );
-    let columns = columns
-        .into_iter()
-        .map(|column| (column, ColumnProfile::unknown_with_ndv_cap(&rows, ndv_cap)))
-        .collect::<BTreeMap<_, _>>();
-    CardinalityProfile::new(rows, columns)
-}
-
-fn sample_eligible(
-    operator: Operator,
-    ctx: &QueryContext,
-    analyses: &AnalysisContext,
-) -> AnalysisResult<bool> {
-    match operator.get(ctx) {
-        OperatorData::Scan(scan) => Ok(scan_samples(scan, analyses)?.is_some()),
-        OperatorData::ConstScan(_) | OperatorData::TableFunction(_) => Ok(false),
-        OperatorData::Selection(data) => Ok(translate_predicate(data.predicate, ctx).is_some()
-            && sample_eligible(data.input, ctx, analyses)?),
-        OperatorData::Projection(data) => sample_eligible(data.input, ctx, analyses),
-        OperatorData::Output(data) => sample_eligible(data.input, ctx, analyses),
-        OperatorData::Sort(data) => sample_eligible(data.input, ctx, analyses),
-        OperatorData::Rename(data) => sample_eligible(data.input, ctx, analyses),
-        OperatorData::Join(_)
-        | OperatorData::Map(_)
-        | OperatorData::Aggregation(_)
-        | OperatorData::Limit(_)
-        | OperatorData::CrossProduct(_) => Ok(false),
-    }
-}
-
 fn scan_pipeline_has_samples(
     operator: Operator,
     ctx: &QueryContext,
@@ -120,35 +52,6 @@ fn scan_pipeline_has_samples(
     }
 }
 
-fn evaluate_sample_tree(
-    operator: Operator,
-    ctx: &QueryContext,
-    analyses: &AnalysisContext,
-) -> AnalysisResult<Option<SampleRelation>> {
-    match operator.get(ctx) {
-        OperatorData::Scan(scan) => scan_relation(scan, analyses),
-        OperatorData::Selection(data) => {
-            let Some(input) = evaluate_sample_tree(data.input, ctx, analyses)? else {
-                return Ok(None);
-            };
-            let Some(predicate) = translate_predicate(data.predicate, ctx) else {
-                return Ok(None);
-            };
-            match filter_relation(&input, &predicate) {
-                Ok(relation) => Ok(Some(relation)),
-                Err(_) => Ok(None),
-            }
-        }
-        OperatorData::Projection(data) => {
-            evaluate_sample_tree_no_filter(data.input, ctx, analyses)
-        }
-        OperatorData::Output(data) => evaluate_sample_tree(data.input, ctx, analyses),
-        OperatorData::Sort(data) => evaluate_sample_tree(data.input, ctx, analyses),
-        OperatorData::Rename(data) => evaluate_sample_tree(data.input, ctx, analyses),
-        _ => Ok(None),
-    }
-}
-
 fn evaluate_sample_tree_no_filter(
     operator: Operator,
     ctx: &QueryContext,
@@ -156,12 +59,8 @@ fn evaluate_sample_tree_no_filter(
 ) -> AnalysisResult<Option<SampleRelation>> {
     match operator.get(ctx) {
         OperatorData::Scan(scan) => scan_relation(scan, analyses),
-        OperatorData::Selection(data) => {
-            evaluate_sample_tree_no_filter(data.input, ctx, analyses)
-        }
-        OperatorData::Projection(data) => {
-            evaluate_sample_tree_no_filter(data.input, ctx, analyses)
-        }
+        OperatorData::Selection(data) => evaluate_sample_tree_no_filter(data.input, ctx, analyses),
+        OperatorData::Projection(data) => evaluate_sample_tree_no_filter(data.input, ctx, analyses),
         OperatorData::Output(data) => evaluate_sample_tree_no_filter(data.input, ctx, analyses),
         OperatorData::Sort(data) => evaluate_sample_tree_no_filter(data.input, ctx, analyses),
         OperatorData::Rename(data) => evaluate_sample_tree_no_filter(data.input, ctx, analyses),
@@ -374,12 +273,7 @@ fn translate_scalar(value: &ScalarValue) -> Option<SampleScalar> {
 }
 
 /// Adds a month-day interval to a Date32 (days since UNIX epoch) using civil calendar math.
-fn date32_add_interval(
-    date_days: i32,
-    months: i32,
-    days: i32,
-    subtract: bool,
-) -> Option<i32> {
+fn date32_add_interval(date_days: i32, months: i32, days: i32, subtract: bool) -> Option<i32> {
     let sign = if subtract { -1 } else { 1 };
     let (mut y, mut m, d) = civil_from_days(date_days)?;
     let total_months = i64::from(y) * 12 + i64::from(m) - 1 + i64::from(sign * months);

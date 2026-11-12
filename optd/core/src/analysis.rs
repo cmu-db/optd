@@ -1843,10 +1843,10 @@ fn cardinality_profile(
     ctx: &QueryContext,
     analyses: &mut AnalysisContext,
 ) -> AnalysisResult<Arc<CardinalityProfile>> {
-    if let Some(profile) = sample_cardinality::try_sample_cardinality(operator, ctx, analyses)? {
-        return Ok(Arc::new(profile));
-    }
-
+    // Leaf samples contribute only via selection conjunct selectivity
+    // (`apply_selection_profile` + `try_leaf_sample_relation`). Do not replace the
+    // operator profile with a sample-only estimate: that discarded catalog NDVs /
+    // sketches / eq-classes and forced every join key to the unknown NDV cap (100).
     let config = analyses.cardinality_estimation_config();
     let catalog = Arc::clone(analyses.catalog());
     match operator.get(ctx) {
@@ -2587,7 +2587,7 @@ pub(crate) fn cross_product_profile(
             .distinct
             .cap(output.frequency.value, EstimateSource::Derived);
         output.sketches = None;
-            output.distribution = None;
+        output.distribution = None;
         columns.insert(column, output);
     }
     for (&column, profile) in &right.columns {
@@ -2600,7 +2600,7 @@ pub(crate) fn cross_product_profile(
             .distinct
             .cap(output.frequency.value, EstimateSource::Derived);
         output.sketches = None;
-            output.distribution = None;
+        output.distribution = None;
         columns.insert(column, output);
     }
     CardinalityProfile {
@@ -2836,7 +2836,7 @@ fn single_join_profile(
             .distinct
             .cap(output.frequency.value, EstimateSource::Derived);
         output.sketches = None;
-            output.distribution = None;
+        output.distribution = None;
         columns.insert(column, output);
     }
     CardinalityProfile {
@@ -4259,7 +4259,9 @@ fn bucket_range_overlap_rows(
         {
             1.0
         }
-        BinaryOp::Lt if crate::catalog::scalar_order(lower, literal).is_some_and(|o| !o.is_lt()) => {
+        BinaryOp::Lt
+            if crate::catalog::scalar_order(lower, literal).is_some_and(|o| !o.is_lt()) =>
+        {
             0.0
         }
         BinaryOp::LtEq
@@ -4272,7 +4274,9 @@ fn bucket_range_overlap_rows(
         {
             1.0
         }
-        BinaryOp::Gt if crate::catalog::scalar_order(upper, literal).is_some_and(|o| !o.is_gt()) => {
+        BinaryOp::Gt
+            if crate::catalog::scalar_order(upper, literal).is_some_and(|o| !o.is_gt()) =>
+        {
             0.0
         }
         BinaryOp::GtEq
@@ -7213,8 +7217,8 @@ mod tests {
                             upper_bound: Some(ScalarValue::Int64(100)),
                             frequency: Some(100),
                             distinct: Some(100),
-                                                        sketches: None,
-distribution: None,
+                            sketches: None,
+                            distribution: None,
                         },
                     )]
                     .into_iter()
@@ -7276,8 +7280,8 @@ distribution: None,
                             upper_bound: Some(ScalarValue::Int64(100)),
                             frequency: Some(100),
                             distinct: Some(100),
-                                                        sketches: None,
-distribution: None,
+                            sketches: None,
+                            distribution: None,
                         },
                     )]
                     .into_iter()
@@ -7374,6 +7378,121 @@ distribution: None,
     }
 
     #[test]
+    fn leaf_sample_filter_preserves_catalog_join_key_ndv() {
+        use arrow_array::{Int64Array, RecordBatch, StringArray};
+        use optd_sampling::{SampleProvenance, TableSample};
+
+        // Regression: sample leaf CE must not replace catalog key NDVs with the
+        // unknown-column cap (100). That made every equi-join use ~1/100 selectivity.
+        let mut ctx = QueryContext::new();
+        let id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
+        let seg = ColumnData::new("seg", DataType::Utf8).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("users"),
+            columns: vec![id, seg],
+        })
+        .add(&mut ctx);
+        let seg_ref = ExprData::ColumnRef(seg).add(&mut ctx);
+        let literal = ExprData::Literal(ScalarValue::Utf8("A".into())).add(&mut ctx);
+        let predicate = ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: seg_ref,
+            right: literal,
+        }
+        .add(&mut ctx);
+        let selection = OperatorData::Selection(Selection {
+            predicate,
+            input: scan,
+        })
+        .add(&mut ctx);
+
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("seg", DataType::Utf8, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(Int64Array::from(vec![1_i64, 2, 3, 4])),
+                Arc::new(StringArray::from(vec!["A", "A", "B", "C"])),
+            ],
+        )
+        .unwrap();
+        let samples = TableSample::try_new(
+            schema.clone(),
+            vec![batch],
+            4,
+            10_000,
+            SampleProvenance::Past,
+        )
+        .unwrap();
+
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        catalog
+            .create_table(TableRef::bare("users"), schema, None)
+            .unwrap();
+        catalog
+            .set_table_samples(TableRef::bare("users"), samples)
+            .unwrap();
+        catalog
+            .set_table_statistics(
+                TableRef::bare("users"),
+                TableStatistics {
+                    row_count: Some(10_000),
+                    size_bytes: None,
+                    column_statistics: [
+                        (
+                            "id".to_string(),
+                            ColumnStatistics {
+                                lower_bound: None,
+                                upper_bound: None,
+                                frequency: Some(10_000),
+                                distinct: Some(10_000),
+                                sketches: None,
+                                distribution: None,
+                            },
+                        ),
+                        (
+                            "seg".to_string(),
+                            ColumnStatistics {
+                                lower_bound: None,
+                                upper_bound: None,
+                                frequency: Some(10_000),
+                                distinct: Some(4),
+                                sketches: None,
+                                distribution: None,
+                            },
+                        ),
+                    ]
+                    .into_iter()
+                    .collect(),
+                    column_groups: Vec::new(),
+                    constraints: Default::default(),
+                },
+            )
+            .unwrap();
+        let mut analyses = AnalysisContext::new(catalog);
+
+        let profile = analyses
+            .get::<CardinalityEstimationV1>(&ctx, selection)
+            .unwrap();
+
+        // Sample: 2/4 match → 5000 rows; join key must keep a large NDV, not the 100 cap.
+        assert_eq!(profile.rows.value, 5_000.0);
+        assert_eq!(profile.rows.source, EstimateSource::Sample);
+        assert!(
+            profile.columns[&id].distinct.value > 100.0,
+            "join-key NDV collapsed to {}; sample leaf CE must retain catalog/surviving NDVs",
+            profile.columns[&id].distinct.value
+        );
+        assert!(
+            profile.columns[&id].distinct.value >= 1_000.0,
+            "expected surviving id NDV on the order of thousands, got {}",
+            profile.columns[&id].distinct.value
+        );
+    }
+
+    #[test]
     fn cardinality_estimation_sample_zero_matches_estimates_zero() {
         use arrow_array::{Int64Array, RecordBatch};
         use optd_sampling::{SampleProvenance, TableSample};
@@ -7400,9 +7519,11 @@ distribution: None,
         .add(&mut ctx);
 
         let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]));
-        let batch =
-            RecordBatch::try_new(schema.clone(), vec![Arc::new(Int64Array::from(vec![1, 2, 3]))])
-                .unwrap();
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![Arc::new(Int64Array::from(vec![1, 2, 3]))],
+        )
+        .unwrap();
         let samples =
             TableSample::try_new(schema.clone(), vec![batch], 3, 300, SampleProvenance::Past)
                 .unwrap();
@@ -7679,8 +7800,8 @@ distribution: None,
                             upper_bound: Some(ScalarValue::Int64(9)),
                             frequency: Some(10),
                             distinct: Some(7),
-                                                        sketches: None,
-distribution: None,
+                            sketches: None,
+                            distribution: None,
                         },
                     )]
                     .into_iter()
@@ -7772,8 +7893,8 @@ distribution: None,
                             upper_bound: Some(ScalarValue::Date32(10_591)),
                             frequency: Some(10_000),
                             distinct: Some(2_557),
-                                                        sketches: None,
-distribution: None,
+                            sketches: None,
+                            distribution: None,
                         },
                     )]
                     .into_iter()
@@ -7836,8 +7957,8 @@ distribution: None,
                             upper_bound: None,
                             frequency: Some(100),
                             distinct: Some(10),
-                                                        sketches: None,
-distribution: None,
+                            sketches: None,
+                            distribution: None,
                         },
                     )]
                     .into_iter()
@@ -7929,8 +8050,8 @@ distribution: None,
                                 upper_bound: None,
                                 frequency: Some(1_000),
                                 distinct: Some(100),
-                                                                sketches: None,
-distribution: None,
+                                sketches: None,
+                                distribution: None,
                             },
                         ),
                         (
@@ -7940,8 +8061,8 @@ distribution: None,
                                 upper_bound: None,
                                 frequency: Some(1_000),
                                 distinct: Some(100),
-                                                                sketches: None,
-distribution: None,
+                                sketches: None,
+                                distribution: None,
                             },
                         ),
                     ]
@@ -9633,8 +9754,8 @@ distribution: None,
                     upper_bound: observed.iter().max().copied().map(ScalarValue::Int64),
                     frequency: Some(observed.len()),
                     distinct: Some(distinct),
-                                        sketches: None,
-distribution: None,
+                    sketches: None,
+                    distribution: None,
                 },
             )]
             .into_iter()
@@ -9655,8 +9776,8 @@ distribution: None,
                     upper_bound: None,
                     frequency: Some(rows),
                     distinct: Some(distinct),
-                                        sketches: None,
-distribution: None,
+                    sketches: None,
+                    distribution: None,
                 },
             )]
             .into_iter()
