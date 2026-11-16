@@ -1,0 +1,173 @@
+use sea_orm::DbErr;
+use snafu::Snafu;
+
+use crate::{SnapshotId, relation::StorageKind};
+
+/// Error returned by catalog reads and mutations.
+#[derive(Debug, Snafu)]
+pub enum CatalogError {
+    /// Persistence-layer failure.
+    #[snafu(transparent)]
+    Database { source: DbErr },
+
+    /// Requested external catalog is not visible.
+    #[snafu(display("catalog {catalog_id} not found"))]
+    CatalogNotFound { catalog_id: i64 },
+
+    #[snafu(display("catalog '{catalog_name}' already exists"))]
+    CatalogAlreadyExists { catalog_name: String },
+
+    #[snafu(display("catalog registration fields must not be empty"))]
+    InvalidCatalogRegistration,
+
+    #[snafu(display("catalog writer mutex is missing"))]
+    MissingWriterMutex,
+
+    #[snafu(display("catalog {counter} counter is exhausted"))]
+    CounterExhausted { counter: &'static str },
+
+    #[snafu(display("duplicate statistics for column {column_id} in relation {relation_id}"))]
+    DuplicateColumnStatistics { relation_id: i64, column_id: i64 },
+
+    /// Requested snapshot does not exist.
+    #[snafu(display("snapshot {snapshot_id} not found"))]
+    SnapshotNotFound { snapshot_id: SnapshotId },
+
+    /// A write was based on an outdated global snapshot.
+    #[snafu(display("stale snapshot: expected {expected}, latest is {actual}"))]
+    StaleSnapshot {
+        expected: SnapshotId,
+        actual: SnapshotId,
+    },
+
+    /// Requested schema ID is not visible.
+    #[snafu(display("schema {schema_id} not found"))]
+    SchemaNotFound { schema_id: i64 },
+
+    /// Requested schema name is not visible.
+    #[snafu(display("schema '{schema_name}' not found"))]
+    SchemaNameNotFound { schema_name: String },
+
+    /// A visible schema already has the requested name.
+    #[snafu(display("schema '{schema_name}' already exists"))]
+    SchemaAlreadyExists { schema_name: String },
+
+    /// Requested relation ID is not visible.
+    #[snafu(display("relation {relation_id} not found"))]
+    RelationNotFound { relation_id: i64 },
+
+    /// Requested relation name is not visible in its schema.
+    #[snafu(display("relation '{schema_name}.{relation_name}' not found"))]
+    RelationNameNotFound {
+        schema_name: String,
+        relation_name: String,
+    },
+
+    /// Requested index ID is not visible.
+    #[snafu(display("index {index_id} not found"))]
+    IndexNotFound { index_id: i64 },
+
+    /// A visible index already has the requested relation-local name.
+    #[snafu(display("index '{index_name}' already exists on relation {relation_id}"))]
+    IndexAlreadyExists {
+        relation_id: i64,
+        index_name: String,
+    },
+
+    /// Index metadata was requested for a relation without relational storage.
+    #[snafu(display(
+        "indexes are not supported for relation {relation_id} with storage {storage_kind:?}"
+    ))]
+    IndexUnsupportedStorage {
+        relation_id: i64,
+        storage_kind: StorageKind,
+    },
+
+    /// An index references a column not visible in its relation.
+    #[snafu(display("column {column_id} not found in indexed relation {relation_id}"))]
+    IndexColumnNotFound { relation_id: i64, column_id: i64 },
+
+    /// An index definition violates catalog invariants.
+    #[snafu(display("invalid index definition: {reason}"))]
+    InvalidIndexDefinition { reason: String },
+
+    /// Ordered index fields could not be encoded or decoded.
+    #[snafu(display("invalid index fields: {reason}"))]
+    IndexFields { reason: String },
+
+    #[snafu(display("statistics invalidation requires at least one relation"))]
+    EmptyStatisticsInvalidation,
+
+    /// Requested advanced statistics object is not visible in this catalog.
+    #[snafu(display("advanced statistics {statistics_id} not found"))]
+    AdvancedStatisticsNotFound { statistics_id: i64 },
+
+    #[snafu(display(
+        "advanced statistics '{statistics_name}' already exists on relation {relation_id}"
+    ))]
+    AdvancedStatisticsAlreadyExists {
+        relation_id: i64,
+        statistics_name: String,
+    },
+
+    #[snafu(display("invalid advanced statistics: {reason}"))]
+    InvalidAdvancedStatistics { reason: String },
+
+    /// A statistics payload references a column not visible in its relation.
+    #[snafu(display("column {column_id} not found in relation {relation_id}"))]
+    StatisticsColumnNotFound {
+        /// Relation expected to own the referenced column.
+        relation_id: i64,
+        /// Relation-scoped durable column identifier.
+        column_id: i64,
+    },
+
+    /// A statistics count cannot be represented by the persistence schema.
+    #[snafu(display("statistics field '{field}' is out of range: {value}"))]
+    StatisticsCountOutOfRange {
+        /// Name of the count field being encoded or decoded.
+        field: &'static str,
+        /// Rejected value rendered without truncation.
+        value: String,
+    },
+
+    /// A statistics definition contains an invalid column-ID vector.
+    #[snafu(display("invalid statistics column IDs: {reason}"))]
+    StatisticsColumnIds {
+        /// Explanation of the invalid JSON shape or non-canonical values.
+        reason: String,
+    },
+
+    /// A typed statistics bound could not be encoded or decoded.
+    #[snafu(display("invalid statistics value: {source}"))]
+    StatisticsValue {
+        /// JSON encoding or decoding failure.
+        source: serde_json::Error,
+    },
+
+    /// A statistics payload uses an unsupported typed-value encoding.
+    #[snafu(display("unsupported statistics value encoding version {version}"))]
+    UnsupportedStatisticsValueEncoding {
+        /// Encoding version found in the persisted payload.
+        version: i32,
+    },
+
+    /// A visible relation already has the requested qualified name.
+    #[snafu(display("relation '{schema_name}.{relation_name}' already exists"))]
+    RelationAlreadyExists {
+        schema_name: String,
+        relation_name: String,
+    },
+
+    /// A schema cannot be dropped while it contains a visible relation.
+    #[snafu(display(
+        "cannot drop schema {schema_id}: active relation '{relation_name}' still exists"
+    ))]
+    SchemaNotEmpty {
+        schema_id: i64,
+        relation_name: String,
+    },
+}
+
+/// Result returned by public catalog operations.
+pub type CatalogResult<T> = Result<T, CatalogError>;

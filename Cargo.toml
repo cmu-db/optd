@@ -3,5 +3,9 @@ members = [
     "optd/core",
     "optd/connectors/datafusion",
     "optd/sketches",
+    "optd/catalog",
 ]
 resolver = "2"
+
+[workspace.dependencies]
+snafu = "0.8.6"

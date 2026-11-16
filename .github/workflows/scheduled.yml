@@ -19,6 +19,8 @@ env:
   CARGO_PROFILE_TEST_DEBUG: 0
   CARGO_TERM_COLOR: always
 
+# PostgreSQL coverage runs in test.yml's dedicated service-backed job.
+# These service-free nightly jobs retain SQLite coverage and exclude opt-in PG tests.
 jobs:
   nightly:
     if: github.event_name != 'pull_request'
@@ -45,7 +47,7 @@ jobs:
         if: steps.cache-tpch.outputs.cache-hit != 'true'
         run: bash ./scripts/download_tpch_hf.sh
       - name: cargo nextest
-        run: cargo nextest run --workspace --locked -E 'not binary(slt)'
+        run: cargo nextest run --workspace --locked -E 'not binary(slt) and not (package(optd-catalog) and test(/^postgres_/))'
 
   updated:
     if: github.event_name != 'pull_request'
@@ -74,7 +76,7 @@ jobs:
         if: steps.cache-tpch.outputs.cache-hit != 'true'
         run: bash ./scripts/download_tpch_hf.sh
       - name: cargo nextest
-        run: cargo nextest run --workspace --locked -E 'not binary(slt)'
+        run: cargo nextest run --workspace --locked -E 'not binary(slt) and not (package(optd-catalog) and test(/^postgres_/))'
         env:
           RUSTFLAGS: -D deprecated
 

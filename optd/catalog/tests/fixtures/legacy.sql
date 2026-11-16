@@ -1,0 +1,21 @@
+-- Frozen original schema, deliberately independent of runtime SeaORM entities.
+CREATE TABLE seaql_migrations (version VARCHAR(255) PRIMARY KEY, applied_at BIGINT NOT NULL);
+INSERT INTO seaql_migrations VALUES ('initial', 0), ('statistics', 0);
+CREATE TABLE optd_snapshot (snapshot_id INTEGER PRIMARY KEY, snapshot_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, next_catalog_id BIGINT NOT NULL);
+CREATE TABLE optd_branch (branch_name VARCHAR(255) PRIMARY KEY, current_snapshot_id BIGINT NOT NULL);
+CREATE TABLE optd_schema (row_id INTEGER PRIMARY KEY, schema_id BIGINT NOT NULL, begin_snapshot BIGINT NOT NULL, end_snapshot BIGINT, schema_name VARCHAR(255) NOT NULL);
+CREATE TABLE optd_relation (row_id INTEGER PRIMARY KEY, relation_id BIGINT NOT NULL, begin_snapshot BIGINT NOT NULL, end_snapshot BIGINT, schema_id BIGINT NOT NULL, relation_name VARCHAR(255) NOT NULL, relation_kind VARCHAR(32) NOT NULL, storage_kind VARCHAR(16) NOT NULL);
+CREATE TABLE optd_column (row_id INTEGER PRIMARY KEY, relation_id BIGINT NOT NULL, column_id BIGINT NOT NULL, begin_snapshot BIGINT NOT NULL, end_snapshot BIGINT, column_order BIGINT NOT NULL, column_name VARCHAR(255) NOT NULL, column_type TEXT NOT NULL, nulls_allowed BOOLEAN NOT NULL);
+CREATE TABLE optd_index (row_id INTEGER PRIMARY KEY, index_id BIGINT NOT NULL, relation_id BIGINT NOT NULL, begin_snapshot BIGINT NOT NULL, end_snapshot BIGINT, index_name VARCHAR(255) NOT NULL, access_method VARCHAR(255) NOT NULL, is_unique BOOLEAN NOT NULL, nulls_not_distinct BOOLEAN NOT NULL, fields JSON NOT NULL, status VARCHAR(16) NOT NULL);
+CREATE TABLE optd_statistics (row_id INTEGER PRIMARY KEY, statistics_id BIGINT NOT NULL, relation_id BIGINT NOT NULL, statistics_name VARCHAR(255), statistics_kind VARCHAR(255) NOT NULL, column_ids JSON NOT NULL, begin_snapshot BIGINT NOT NULL, end_snapshot BIGINT);
+CREATE TABLE optd_statistics_payload (row_id INTEGER PRIMARY KEY, statistics_id BIGINT NOT NULL, statistics_begin_snapshot BIGINT NOT NULL, begin_snapshot BIGINT NOT NULL, end_snapshot BIGINT, value_encoding_version INTEGER NOT NULL, collected_at TIMESTAMP NOT NULL, row_count BIGINT, size_bytes BIGINT);
+CREATE TABLE optd_column_statistics (row_id INTEGER PRIMARY KEY, statistics_id BIGINT NOT NULL, statistics_begin_snapshot BIGINT NOT NULL, payload_begin_snapshot BIGINT NOT NULL, column_id BIGINT NOT NULL, frequency BIGINT, distinct_count BIGINT, lower_bound TEXT, upper_bound TEXT);
+INSERT INTO optd_snapshot (snapshot_id, next_catalog_id) VALUES (0,1),(1,2),(2,3),(3,4),(5,5),(6,5),(7,5),(8,5),(9,5);
+INSERT INTO optd_branch VALUES ('main',9);
+INSERT INTO optd_schema VALUES (1,1,1,9,'public');
+INSERT INTO optd_relation VALUES (1,2,2,8,1,'numbers','TABLE','RELATIONAL');
+INSERT INTO optd_column VALUES (1,2,0,2,8,0,'x','Int32',FALSE);
+INSERT INTO optd_index VALUES (1,3,2,3,7,'numbers_x','btree',FALSE,FALSE,'[{"role":"KEY","column_id":0,"direction":null,"null_order":null,"collation":null,"operator_class":null}]','READY');
+INSERT INTO optd_statistics VALUES (1,4,2,NULL,'table','[]',5,NULL);
+INSERT INTO optd_statistics_payload VALUES (1,4,5,5,6,1,'2026-01-01 00:00:00+00:00',1,NULL);
+INSERT INTO optd_column_statistics VALUES (1,4,5,5,0,1,1,'{"Int32":1}','{"Int32":1}');
