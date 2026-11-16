@@ -115,6 +115,9 @@ The parent map is keyed on the root operator at time of computation. If the root
 Each analysis owns its caching. The framework does not mandate or provide a cache.
 
 - Bottom-up analyses typically memoize per operator handle using `OperatorAnalysisState`.
+  The shared `CachedAnalysis` implementation caches both successful values and returned errors;
+  failed requests return the cached error without recomputing until the cache is cleared.
+  In-progress markers are removed on either outcome and are used only for cycle detection.
 - Top-down analyses may cache a full `HashMap<Operator, Value>` keyed on the root.
 - Analyses that are cheap to recompute may skip caching entirely.
 

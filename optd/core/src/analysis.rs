@@ -124,8 +124,8 @@ trait CachedAnalysis: Analysis {
     where
         Self: Sized,
     {
-        if let Some(value) = self.state().values.borrow().get(&operator) {
-            return Ok(value.clone());
+        if let Some(result) = self.state().values.borrow().get(&operator) {
+            return result.clone();
         }
 
         if !self.state().in_progress.borrow_mut().insert(operator) {
@@ -138,12 +138,11 @@ trait CachedAnalysis: Analysis {
         let result = self.compute(ctx, analyses, operator);
         self.state().in_progress.borrow_mut().remove(&operator);
 
-        let value = result?;
         self.state()
             .values
             .borrow_mut()
-            .insert(operator, value.clone());
-        Ok(value)
+            .insert(operator, result.clone());
+        result
     }
 
     fn clear_cache(&self) {
@@ -151,9 +150,9 @@ trait CachedAnalysis: Analysis {
     }
 }
 
-/// Cache state for an operator analysis.
+/// Cache state for an operator analysis, retaining successes and errors until cleared.
 pub struct OperatorAnalysisState<T> {
-    values: RefCell<HashMap<Operator, T>>,
+    values: RefCell<HashMap<Operator, AnalysisResult<T>>>,
     in_progress: RefCell<HashSet<Operator>>,
 }
 
@@ -167,7 +166,7 @@ impl<T> Default for OperatorAnalysisState<T> {
 }
 
 impl<T> OperatorAnalysisState<T> {
-    /// Clears cached values and in-progress markers.
+    /// Clears cached values, errors, and in-progress markers.
     pub fn clear(&self) {
         self.values.borrow_mut().clear();
         self.in_progress.borrow_mut().clear();
@@ -1757,13 +1756,13 @@ impl CardinalityEstimationV1 {
     ) -> AnalysisResult<Arc<CardinalityProfile>> {
         let analysis = analyses.registry_entry::<Self>();
         let estimator = typed_analysis::<Self>(&analysis)?;
-        if let Some(value) = estimator.state().values.borrow().get(&op).cloned() {
+        if let Some(result) = estimator.state().values.borrow().get(&op).cloned() {
             if let Some((session, _)) = analyses.observation_context()
                 && session.mode() == ObservationMode::DetailedSummary
             {
                 session.append(None, ObservationPayload::CacheReuse { operator: op });
             }
-            return Ok(value);
+            return result;
         }
         estimator.get_cached(ctx, analyses, op)
     }
@@ -1773,12 +1772,13 @@ impl CardinalityEstimationV1 {
         op: Operator,
     ) -> AnalysisResult<Option<Arc<CardinalityProfile>>> {
         let analysis = analyses.registry_entry::<Self>();
-        Ok(typed_analysis::<Self>(&analysis)?
+        typed_analysis::<Self>(&analysis)?
             .state()
             .values
             .borrow()
             .get(&op)
-            .cloned())
+            .cloned()
+            .transpose()
     }
 }
 
@@ -5549,6 +5549,62 @@ mod tests {
     };
     use arrow_schema::{DataType, Field, Schema};
     use std::sync::Arc;
+
+    #[test]
+    fn cached_analysis_retains_errors_until_cleared() {
+        #[derive(Default)]
+        struct FailingAnalysis {
+            state: OperatorAnalysisState<()>,
+            calls: Cell<usize>,
+        }
+
+        impl Analysis for FailingAnalysis {
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
+
+            fn clear(&self) {
+                self.clear_cache();
+            }
+        }
+
+        impl CachedAnalysis for FailingAnalysis {
+            type Output = ();
+
+            fn state(&self) -> &OperatorAnalysisState<()> {
+                &self.state
+            }
+
+            fn compute(
+                &self,
+                _ctx: &QueryContext,
+                _analyses: &mut AnalysisContext,
+                _operator: Operator,
+            ) -> AnalysisResult<()> {
+                self.calls.set(self.calls.get() + 1);
+                Err(AnalysisError::Catalog("test failure".into()))
+            }
+        }
+
+        let mut ctx = QueryContext::new();
+        let operator = OperatorData::ConstScan(crate::ConstScan {
+            columns: vec![],
+            rows: vec![],
+        })
+        .add(&mut ctx);
+        let mut analyses = crate::test_analyses(&ctx);
+        let analysis = FailingAnalysis::default();
+        let expected = Err(AnalysisError::Catalog("test failure".into()));
+
+        assert_eq!(analysis.get_cached(&ctx, &mut analyses, operator), expected);
+        assert_eq!(analysis.get_cached(&ctx, &mut analyses, operator), expected);
+        assert_eq!(analysis.calls.get(), 1);
+        assert!(analysis.state.in_progress.borrow().is_empty());
+
+        analysis.clear();
+        assert_eq!(analysis.get_cached(&ctx, &mut analyses, operator), expected);
+        assert_eq!(analysis.calls.get(), 2);
+    }
 
     #[test]
     fn distinct_domain_bounds_do_not_multiply_correlated_lower_bounds() {
