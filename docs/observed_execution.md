@@ -151,26 +151,9 @@ metadata failures, metadata-only retry, batch rollback and old summary decoding.
 A deterministic capture gate also verifies DROP/recreate/recollection between the
 first provider check and metadata lookup cannot invalidate replacement statistics.
 
-The following records are historical observation-phase checks, preceding the later
-merge-readiness hardening. See [the current audit](../catalog_pr_review.md) for the
-final tree's workspace, PostgreSQL, feature-isolation and SQL benchmark results.
+Run focused checks with:
 
-Post-fix verification task `bd37df15a` passed:
-
-- 14 observed-execution tests and 12 focused persistent-catalog/runner tests.
-- Catalog: 12 unit tests, 21 exercised SQLite integration tests, and 3 compile-fail
-  doctests. Three opt-in PostgreSQL tests returned early because the URL was unset;
-  they are **not** PostgreSQL verification. The local Docker daemon was unavailable.
-- Workspace/all-targets Clippy with warnings denied, formatting, and diff checks.
-
-The native-INSERT test failed against the earlier rejecting wrapper before passing
-with original source providers. Initial lifecycle tests caught an EXPLAIN session
-configuration bug and two incorrectly staged fixtures; these were corrected before
-accepting the passing gate. Independent read-only review then found a capture race
-and an untracked-source reporting issue. Both were fixed and regression-tested;
-follow-up review found no remaining issues. Review is advisory, not a test substitute.
-
-Observation-phase release verification (`bc2ff33a0`) passed all 96 connector library
-tests, including the gated capture-race regressions, and all 17 feature SQLLogicTests.
-The other 270 SLTs and complete workspace test suite had not been run at that stage.
-Subsequent source hardening and broader checks are recorded in the current audit.
+```sh
+cargo test -p optd-datafusion --lib observed_execution --locked
+cargo test -p optd-catalog --test statistics_invalidation --locked
+```

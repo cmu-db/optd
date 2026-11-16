@@ -8,11 +8,6 @@ snapshot of externally owned rows. Source writes, including writes outside this 
 not detected automatically. File manifests, delete files, file allocation, compaction, garbage
 collection, physical data time travel, and new storage providers are deferred.
 
-The earlier broad design in `catalog_design.md` is historical. This document is the current
-implementation contract. No stash was applied or dropped. The inspected
-`stash@{0}:docs/optd-catalog.dbml` proposes a global snapshot history, schema versions, change
-summaries, external catalog registrations, and schema ownership without branch heads.
-
 ## Upstream comparison
 
 Reference: https://github.com/duckdb/ducklake at
@@ -217,7 +212,7 @@ writes would be lossy. To use the old binary, restore a pre-upgrade backup. Do n
 binary against an upgraded database. The DataFusion installer runs pending migrations, so
 perform the backup and offline preparation **before** starting the new application.
 
-## Verification and completion evidence
+## Tests
 
 Primary test artifacts:
 - `optd/catalog/tests/single_history.rs` and independent `fixtures/legacy.sql`: fresh and legacy
@@ -242,17 +237,3 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo fmt --all --check
 git diff --check
 ```
-
-The intermediate statistics-flattening refactor was withdrawn: its verification does not
-apply to the additive advanced-statistics implementation. Current checks are recorded in
-[advanced_statistics.md](advanced_statistics.md).
-
-Historical single-history verification (`b139bc73b`) passed 9 catalog unit tests, 10 integration tests
-with the local PostgreSQL backend enabled, 3 compile-fail doctests, and 9 focused DataFusion
-tests. Workspace Clippy with warnings denied, formatting, and diff checks passed. SHA-256
-fingerprints for all 373 catalog/connector package files were unchanged throughout that run.
-Release verification (`b1342c9b4`) passed all 79 connector library tests and 17 feature SLTs;
-it did not run the complete JOB/TPC-H or workspace test suites. Earlier runs caught a PostgreSQL
-fixture-normalization error and a cross-catalog UDF uninstall bug; neither was accepted as a
-passing final gate. See [the requirement audit](catalog_single_history_audit.md) for the full
-requirement-to-artifact mapping and the remaining, explicitly deferred limitations.

@@ -99,8 +99,6 @@ capabilities instead of installing the earlier DML-rejecting table wrapper.
 Back up the catalog, stop writers, and upgrade a copy before deployment, as described
 in [catalog_single_history.md](catalog_single_history.md). The supported input is
 the existing basic-statistics layout, with pending single-history migration allowed.
-The withdrawn experimental flattening migration is not an upgrade input; restore a
-pre-refactor backup rather than editing migration records or deleting data.
 
 Coverage lives in `optd/catalog/tests/advanced_statistics.rs`, the retained basic
 statistics test in `optd/catalog/src/catalog_tests.rs`, and
@@ -121,21 +119,3 @@ git diff --check
 
 PostgreSQL tests require `OPTD_TEST_POSTGRES_URL` pointing to a disposable local
 instance; unset-URL tests return early and are not PostgreSQL verification.
-
-Historical verification before shared write observation (`be103e6dc`) passed:
-
-- Catalog: 12 unit tests, 19 integration tests, and 3 compile-fail doctests.
-  Integration coverage includes three tests against an actual disposable local
-  PostgreSQL 18 instance: legacy migration, concurrent publication, and advanced
-  object publication/invalidation with injected summary failure.
-- DataFusion: all 11 focused `persistent_` library tests, including the new
-  basic-only estimator regression.
-- Workspace/all-targets Clippy with `-D warnings`, formatting, and diff checks.
-
-An independent read-only reviewer found the Decimal128 decoding defect, also
-reproduced by the new test; external-tagged contents fixed it and the regression
-passed in the final run. A formatting-only failure in an earlier command chain was
-also corrected before the final gate. The follow-up review found no remaining
-concrete blockers. The newly created loopback-only test container and its anonymous
-volumes were removed after successful verification; the existing container was not
-used or modified. Full release SLT/workspace test suites were not run for this change.
