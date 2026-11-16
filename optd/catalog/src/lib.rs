@@ -4,6 +4,7 @@
 //! SeaORM entities and migrations, transactional catalog
 //! mutations, and snapshot-pinned readers.
 
+pub mod advanced_statistics;
 pub mod catalog;
 pub mod entity;
 mod error;
@@ -12,6 +13,7 @@ pub mod migration;
 pub mod relation;
 pub mod schema;
 pub mod snapshot;
+pub mod source;
 pub mod statistics;
 
 pub use catalog::{Catalog, CatalogReader};

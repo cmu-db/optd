@@ -1,10 +1,9 @@
 # Persistent statistics demo
 
 The first statistics slice persists full-scan table and column summaries in the
-snapshot-aware catalog. It is intentionally narrower than the complete model in
-[catalog_design.md](catalog_design.md): one implicit table-statistics definition
-is created per relation, while every collection produces a new immutable
-payload.
+snapshot-aware catalog. One implicit table-statistics definition is created per
+relation, while every collection produces a new immutable payload. This existing
+basic layout and the SQL collection path remain unchanged.
 
 The persistence tables are:
 
@@ -13,12 +12,17 @@ The persistence tables are:
 - `optd_column_statistics`: non-null count, distinct count, and typed min/max
   bounds for durable `(relation_id, column_id)` identities
 
-A collection commits and publishes a new catalog snapshot. A reader pinned
-before collection sees no payload; a reader pinned to the new snapshot sees it.
-Recollection keeps the same `statistics_id`, closes the previous payload at the
-new snapshot, appends a replacement, and preserves the old result for historical
-readers. Data-changing commits use the same mechanism to close statistics without
-installing a replacement.
+A collection commits and publishes a new catalog snapshot. Recollection keeps the
+same `statistics_id`, closes the previous payload, and preserves old results for
+historical readers. Explicit invalidation closes the active basic payload and all
+active advanced objects in one commit. There is no automatic detection of external
+writes. Original DataFusion providers retain native DML; the shared observed executor
+and runner notify optd after tracked writes. See [observed_execution.md](observed_execution.md).
+
+Optional advanced statistics live separately in `optd_adv_stats`; they do not
+replace these tables or change `collect_stats`/`cardest`. Advanced contents are
+currently supplied through the Rust API, not collected automatically or consumed
+by the DataFusion estimator. See [advanced_statistics.md](advanced_statistics.md).
 
 ## SQL helpers
 
@@ -94,17 +98,27 @@ persisted row count: Some(3)
 estimate after collection: 3
 ```
 
-The SQLite path can be supplied as the first argument. The demo recreates that
-file before running.
+The SQLite path can be supplied as the first argument and must not already exist.
+The demo refuses to overwrite existing files. Without an argument it chooses a
+unique temporary path and prints that path; the database is retained after the run.
 
 ## Current limitations
 
 - Collection is a full scan; sampling, histograms, and most-common values are not
   implemented.
-- DataFusion DML is not yet routed through catalog publication, so the demo
-  assumes immutable table contents between catalog commits. The catalog already
-  exposes snapshot-based statistics invalidation for the future DML path.
-- `cardest` reads the current branch head. Historical catalog reads are covered
+- Non-finite floating-point minimum/maximum bounds (NaN and positive/negative
+  infinity) are stored as unknown rather than invalid JSON numeric values. Row
+  counts, non-null counts, and distinct counts are retained. Previously written
+  version-1 `{"Float64":null}` bounds are also read as unknown; other malformed
+  bounds still produce an error. Finite bounds keep their existing encoding, so
+  no encoding-version change or database migration is needed.
+- DML keeps the source provider's native capabilities. The shared observed executor
+  and runner invalidate basic and advanced statistics after tracked write attempts;
+  metadata maintenance is not atomic with source writes and failures are reported
+  separately. Raw session/provider writes, external clients and writes while
+  persistence is disabled require explicit invalidation. Ended statistics currently
+  use default estimates until recollection; stale-statistics fallback is not implemented.
+- `cardest` reads the latest committed global metadata snapshot. Historical catalog reads are covered
   by the Rust API; a SQL `cardest_at` helper is not currently exposed.
 - Persisted constraints are not yet merged into the planner-side statistics
   catalog.

@@ -10,20 +10,32 @@ pub enum CatalogError {
     #[snafu(transparent)]
     Database { source: DbErr },
 
-    /// Requested branch does not exist.
-    #[snafu(display("branch '{branch_name}' not found"))]
-    BranchNotFound { branch_name: String },
+    /// Requested external catalog is not visible.
+    #[snafu(display("catalog {catalog_id} not found"))]
+    CatalogNotFound { catalog_id: i64 },
+
+    #[snafu(display("catalog '{catalog_name}' already exists"))]
+    CatalogAlreadyExists { catalog_name: String },
+
+    #[snafu(display("catalog registration fields must not be empty"))]
+    InvalidCatalogRegistration,
+
+    #[snafu(display("catalog writer mutex is missing"))]
+    MissingWriterMutex,
+
+    #[snafu(display("catalog {counter} counter is exhausted"))]
+    CounterExhausted { counter: &'static str },
+
+    #[snafu(display("duplicate statistics for column {column_id} in relation {relation_id}"))]
+    DuplicateColumnStatistics { relation_id: i64, column_id: i64 },
 
     /// Requested snapshot does not exist.
     #[snafu(display("snapshot {snapshot_id} not found"))]
     SnapshotNotFound { snapshot_id: SnapshotId },
 
-    /// A write was based on an outdated branch head.
-    #[snafu(display(
-        "stale snapshot for branch '{branch_name}': expected {expected}, current head is {actual}"
-    ))]
+    /// A write was based on an outdated global snapshot.
+    #[snafu(display("stale snapshot: expected {expected}, latest is {actual}"))]
     StaleSnapshot {
-        branch_name: String,
         expected: SnapshotId,
         actual: SnapshotId,
     },
@@ -82,6 +94,24 @@ pub enum CatalogError {
     /// Ordered index fields could not be encoded or decoded.
     #[snafu(display("invalid index fields: {reason}"))]
     IndexFields { reason: String },
+
+    #[snafu(display("statistics invalidation requires at least one relation"))]
+    EmptyStatisticsInvalidation,
+
+    /// Requested advanced statistics object is not visible in this catalog.
+    #[snafu(display("advanced statistics {statistics_id} not found"))]
+    AdvancedStatisticsNotFound { statistics_id: i64 },
+
+    #[snafu(display(
+        "advanced statistics '{statistics_name}' already exists on relation {relation_id}"
+    ))]
+    AdvancedStatisticsAlreadyExists {
+        relation_id: i64,
+        statistics_name: String,
+    },
+
+    #[snafu(display("invalid advanced statistics: {reason}"))]
+    InvalidAdvancedStatistics { reason: String },
 
     /// A statistics payload references a column not visible in its relation.
     #[snafu(display("column {column_id} not found in relation {relation_id}"))]

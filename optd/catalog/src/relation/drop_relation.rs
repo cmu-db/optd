@@ -5,7 +5,7 @@ use crate::{
     relation::DropRelationInfo,
 };
 
-pub async fn drop_relation<C>(
+pub(crate) async fn drop_relation<C>(
     info: DropRelationInfo,
     db: &C,
     end_snapshot: i64,

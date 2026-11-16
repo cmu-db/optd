@@ -3,7 +3,11 @@ use sea_orm_migration::{
     sea_orm::{ActiveValue::Set, EntityTrait, Schema},
 };
 
-use crate::entity;
+// Bootstrap always targets the original schema, even after runtime models evolve.
+mod entity {
+    pub(super) use super::super::legacy::{branch, schema, snapshot};
+    pub(super) use crate::entity::{column, index, relation};
+}
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;

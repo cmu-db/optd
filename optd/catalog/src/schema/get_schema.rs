@@ -27,6 +27,7 @@ where
         )
         .filter(schema::Column::SchemaId.eq(info.schema_id))
         .select_only()
+        .column(schema::Column::CatalogId)
         .column(schema::Column::SchemaId)
         .column(schema::Column::SchemaName)
         .into_partial_model::<SchemaInfo>()

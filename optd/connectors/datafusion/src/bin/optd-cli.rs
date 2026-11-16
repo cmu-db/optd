@@ -103,7 +103,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
     drop(import_guard);
     let runner = match catalog_db.as_ref() {
-        Some(db) => OptdRunner::new_with_persistent_catalog(session, db.clone()),
+        Some(db) => OptdRunner::new_with_persistent_catalog(session, "datafusion", db.clone()),
         None => OptdRunner::new(session),
     };
 

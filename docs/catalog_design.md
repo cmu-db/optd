@@ -1,5 +1,11 @@
 # What is in a database catalog?
 
+> **Historical broad design, not the current implementation contract.** The active
+> metadata-only architecture and migration protocol are documented in
+> [catalog_single_history.md](catalog_single_history.md). Branch heads and managed
+> file storage discussed below are superseded or deferred; the current catalog
+> has one global snapshot history and mirrors externally owned data.
+
 This document describes a snapshot-aware catalog for both relational storage and immutable files. The catalog is SQL-queryable, like PostgreSQL's `pg_catalog`, while also tracking file manifests, partition layouts, and sort orders like a lakehouse catalog.
 
 ## Goals and scope

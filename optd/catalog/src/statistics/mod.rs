@@ -8,6 +8,22 @@ use serde::{Deserialize, Serialize};
 
 use crate::{CatalogError, CatalogResult, snapshot::SnapshotId};
 
+/// Origin recorded in the change summary, not a statistics freshness flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StatisticsInvalidationCause {
+    Explicit,
+    ObservedSql,
+}
+
+/// Atomically invalidate basic payloads and all advanced objects of these relations.
+/// IDs are catalog-scoped, canonicalized and deduplicated; empty batches are rejected.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvalidateStatisticsInfo {
+    pub relation_ids: Vec<i64>,
+    pub cause: StatisticsInvalidationCause,
+}
+
 /// Encoding version used for persisted [`StatisticsValue`] JSON payloads.
 pub const STATISTICS_VALUE_ENCODING_VERSION: i32 = 1;
 
@@ -55,7 +71,8 @@ pub enum StatisticsValue {
     Int32(i32),
     /// Signed 64-bit integer value.
     Int64(i64),
-    /// IEEE 754 double-precision value.
+    /// IEEE 754 double-precision value. Non-finite bounds are omitted when published
+    /// to the catalog; finite values retain the version-1 JSON representation.
     Float64(f64),
     /// UTF-8 string value.
     Utf8(String),
@@ -81,9 +98,10 @@ pub struct ColumnStatistics {
     pub frequency: Option<u64>,
     /// Number of distinct non-null values.
     pub distinct_count: Option<u64>,
-    /// Smallest observed non-null value.
+    /// Smallest observed non-null value. Non-finite floating-point bounds are persisted
+    /// as unknown (`None`), as are legacy JSON `Float64(null)` values when read.
     pub lower_bound: Option<StatisticsValue>,
-    /// Largest observed non-null value.
+    /// Largest observed non-null value, with the same finite-bound policy as `lower_bound`.
     pub upper_bound: Option<StatisticsValue>,
 }
 

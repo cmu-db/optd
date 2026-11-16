@@ -61,7 +61,14 @@ pub(crate) async fn insert_relation_statistics<C: ConnectionTrait>(
         .iter()
         .map(|column| column.column_id)
         .collect::<std::collections::BTreeSet<_>>();
+    let mut supplied_column_ids = std::collections::BTreeSet::new();
     for column in &info.column_statistics {
+        if !supplied_column_ids.insert(column.column_id) {
+            return Err(CatalogError::DuplicateColumnStatistics {
+                relation_id: info.relation_id,
+                column_id: column.column_id,
+            });
+        }
         if !visible_column_ids.contains(&column.column_id) {
             return Err(CatalogError::StatisticsColumnNotFound {
                 relation_id: info.relation_id,
@@ -161,10 +168,35 @@ fn encode_count(field: &'static str, value: Option<u64>) -> CatalogResult<Option
         .transpose()
 }
 
+// JSON has no representation for non-finite numbers. Bounds are optional planning
+// hints, so omit them rather than publish an unreadable Float64(null) payload.
 fn encode_value(value: Option<StatisticsValue>) -> CatalogResult<Option<String>> {
     value
+        .filter(|value| !matches!(value, StatisticsValue::Float64(value) if !value.is_finite()))
         .map(|value| {
             serde_json::to_string(&value).map_err(|source| CatalogError::StatisticsValue { source })
         })
         .transpose()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn non_finite_statistics_bounds_are_omitted() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(
+                encode_value(Some(StatisticsValue::Float64(value))).unwrap(),
+                None
+            );
+        }
+        assert_eq!(encode_value(None).unwrap(), None);
+        assert_eq!(
+            encode_value(Some(StatisticsValue::Float64(1.5)))
+                .unwrap()
+                .as_deref(),
+            Some("{\"Float64\":1.5}")
+        );
+    }
 }

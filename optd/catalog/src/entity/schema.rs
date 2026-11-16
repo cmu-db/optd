@@ -7,6 +7,8 @@ pub struct Model {
     /// Persistence-only row identity with no catalog semantics.
     #[sea_orm(primary_key)]
     row_id: i64,
+    /// Owning external catalog registration.
+    pub catalog_id: i64,
     /// Stable identifier shared by temporal versions of the schema.
     pub schema_id: i64,
     /// First snapshot in which this version is visible.

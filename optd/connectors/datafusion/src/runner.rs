@@ -1,6 +1,9 @@
 //! [`OptdRunner`] — routes SQL through optd IR before execution.
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use async_trait::async_trait;
 use datafusion::arrow::array::RecordBatch;
@@ -28,6 +31,7 @@ use crate::explain_udfs::{
     ExplainStep, explain_steps_box, explain_steps_box_with_config, register_explain_udfs,
 };
 use crate::from_df_logical::from_logical_plan;
+use crate::observed_execution::{StatementObservation, execute_observed_sql};
 use crate::runtime_statistics::RuntimeStatisticsCatalogBuilder;
 use crate::statistics_udfs::build_persistent_statistics_catalog;
 use crate::to_df_logical::to_logical_plan;
@@ -111,6 +115,7 @@ pub fn default_pass_manager() -> PassManager {
 pub struct OptdRunner {
     session: SessionContext,
     statistics_source: StatisticsSource,
+    last_observation: Mutex<Option<StatementObservation>>,
 }
 
 /// Statistics source used while constructing query-local planner catalogs.
@@ -118,7 +123,10 @@ enum StatisticsSource {
     /// Collect and cache statistics directly from DataFusion providers.
     Runtime(RuntimeStatisticsCatalogBuilder),
     /// Read statistics from the snapshot-aware persistent catalog.
-    Persistent(DatabaseConnection),
+    Persistent {
+        db: DatabaseConnection,
+        catalog_name: String,
+    },
 }
 
 #[derive(Debug)]
@@ -159,21 +167,27 @@ impl OptdRunner {
         Self {
             session,
             statistics_source: StatisticsSource::Runtime(runtime_stats),
+            last_observation: Mutex::new(None),
         }
     }
 
-    /// Creates a runner that reads planner statistics from `catalog_db`.
+    /// Creates a runner that reads statistics for `catalog_name` from `catalog_db`.
     ///
-    /// Missing or invalidated payloads use optd's normal fallback estimates; this mode does not
-    /// scan tables automatically during optimization.
+    /// Missing or invalidated payloads and tables in other DataFusion catalogs use optd's normal
+    /// fallback estimates; this mode does not scan tables automatically during optimization.
     pub fn new_with_persistent_catalog(
         session: SessionContext,
+        catalog_name: impl Into<String>,
         catalog_db: DatabaseConnection,
     ) -> Self {
         register_explain_udfs(&session);
         Self {
             session,
-            statistics_source: StatisticsSource::Persistent(catalog_db),
+            statistics_source: StatisticsSource::Persistent {
+                db: catalog_db,
+                catalog_name: catalog_name.into(),
+            },
+            last_observation: Mutex::new(None),
         }
     }
 
@@ -207,7 +221,20 @@ impl OptdRunner {
             .unwrap_or_else(|| OptdExtensionConfig::default().physical_planning)
     }
 
+    /// Last fallback execution report. Source errors and metadata failures are separate;
+    /// the shared executor API is preferable for concurrent callers needing per-call reports.
+    pub fn last_observation(&self) -> Option<StatementObservation> {
+        self.last_observation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
     pub async fn execute_sql(&self, sql: &str) -> Result<RunnerOutput, DFSqlLogicTestError> {
+        *self
+            .last_observation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         let (schema, batches) = if self.optd_enabled() {
             match self.try_via_ir(sql).await {
                 Ok(pair) => pair,
@@ -236,24 +263,21 @@ impl OptdRunner {
         &self,
         sql: &str,
     ) -> Result<(SchemaRef, Vec<RecordBatch>), DFSqlLogicTestError> {
-        let plan = self
-            .session
-            .state()
-            .create_logical_plan(sql)
+        let execution = execute_observed_sql(&self.session, sql)
             .await
             .map_err(DFSqlLogicTestError::DataFusion)?;
-        let df = self
-            .session
-            .execute_logical_plan(plan)
-            .await
-            .map_err(DFSqlLogicTestError::DataFusion)?;
-        let schema = df.schema().inner().clone();
-        let batches = df
-            .collect()
-            .await
-            .map_err(DFSqlLogicTestError::DataFusion)?;
-        let schema = batches.first().map(|b| b.schema()).unwrap_or(schema);
-        Ok((schema, batches))
+        if execution.observation.has_metadata_failure() {
+            eprintln!(
+                "optd metadata observation requires attention; source effects are not rolled back and SQL must not be replayed: {:?}",
+                execution.observation
+            );
+        }
+        *self
+            .last_observation
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(execution.observation);
+        let output = execution.result.map_err(DFSqlLogicTestError::DataFusion)?;
+        Ok((output.schema, output.batches))
     }
 
     pub fn explain_steps_box(&self, sql: &str) -> Result<Vec<ExplainStep>, DFSqlLogicTestError> {
@@ -395,14 +419,24 @@ impl OptdRunner {
         &self,
         plan: &LogicalPlan,
     ) -> Result<PlannedQuery, TryViaIrError> {
+        // Writes/DDL must reach the shared executor even if cached statistics cannot
+        // be read; do not attempt optimizer metadata construction for non-query plans.
+        if !is_supported_relational_plan(plan) {
+            return Err(TryViaIrError::Unsupported("non-query plan".into()));
+        }
         let opt = match &self.statistics_source {
             StatisticsSource::Runtime(runtime_stats) => {
                 optimizer_context_from_logical_plan(&self.session, runtime_stats, plan).await?
             }
-            StatisticsSource::Persistent(db) => {
-                let catalog = build_persistent_statistics_catalog(&self.session, db.clone(), plan)
-                    .await
-                    .map_err(|error| TryViaIrError::Failed(error.to_string()))?;
+            StatisticsSource::Persistent { db, catalog_name } => {
+                let catalog = build_persistent_statistics_catalog(
+                    &self.session,
+                    db.clone(),
+                    catalog_name,
+                    plan,
+                )
+                .await
+                .map_err(|error| TryViaIrError::Failed(error.to_string()))?;
                 optimizer_context_from_logical_plan_with_catalog(&self.session, plan, catalog)
                     .await?
             }
@@ -540,6 +574,7 @@ mod tests {
     use crate::config::OptdExtensionConfig;
     use crate::persistent_catalog::install_persistent_catalog;
     use crate::setup::session_context_with_information_schema;
+    use crate::test_utils::test_sqlite_connection;
     use datafusion::arrow::array::{ArrayRef, Int64Array};
     use datafusion::arrow::datatypes::{DataType, Field, Schema};
     use datafusion::arrow::record_batch::RecordBatch;
@@ -547,7 +582,6 @@ mod tests {
     use datafusion::prelude::{SessionConfig, SessionContext};
     use optd_catalog::Catalog;
     use optd_core::CardinalityEstimationV1;
-    use sea_orm::Database;
     use std::sync::Arc;
 
     fn session_with_optd_config(config: OptdExtensionConfig) -> SessionContext {
@@ -564,11 +598,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn persistent_runner_uses_catalog_statistics_without_runtime_collection() {
-        let temp_dir = tempfile::tempdir().unwrap();
-        let path = temp_dir.path().join("catalog.sqlite");
-        let db = Database::connect(format!("sqlite://{}?mode=rwc", path.display()))
-            .await
-            .unwrap();
+        let (_temp_dir, db) = test_sqlite_connection().await;
         let session = session_context_with_information_schema();
         install_persistent_catalog(&session, "datafusion", db.clone())
             .await
@@ -591,7 +621,14 @@ mod tests {
             .await
             .unwrap();
 
-        let runner = OptdRunner::new_with_persistent_catalog(session, db.clone());
+        for sql in [
+            "CREATE DATABASE other",
+            "CREATE SCHEMA other.public",
+            "CREATE TABLE other.public.numbers AS SELECT 1 AS value",
+        ] {
+            session.sql(sql).await.unwrap().collect().await.unwrap();
+        }
+        let runner = OptdRunner::new_with_persistent_catalog(session, "datafusion", db.clone());
         let plan = runner
             .parse_logical_plan("SELECT * FROM numbers")
             .await
@@ -603,6 +640,23 @@ mod tests {
             .get::<CardinalityEstimationV1>(&planned.query, root)
             .unwrap();
         assert_eq!(estimate.rows.value, 3.0);
+
+        let foreign_plan = runner
+            .parse_logical_plan("SELECT * FROM other.public.numbers")
+            .await
+            .unwrap();
+        let foreign_planned = runner
+            .optimized_ir_from_logical_plan(&foreign_plan)
+            .await
+            .unwrap();
+        let mut foreign_analyses = foreign_planned.analyze();
+        let foreign_estimate = foreign_analyses
+            .get::<CardinalityEstimationV1>(
+                &foreign_planned.query,
+                foreign_planned.query.root().unwrap(),
+            )
+            .unwrap();
+        assert_eq!(foreign_estimate.rows.value, 1000.0);
 
         let catalog = Catalog::new(db.clone());
         let reader = catalog.reader().await.unwrap();
@@ -625,6 +679,94 @@ mod tests {
 
         drop(catalog);
         drop(runner);
+        db.close().await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn persistent_advanced_statistics_do_not_replace_basic_statistics() {
+        use optd_catalog::advanced_statistics::{
+            AdvancedStatisticsContents, CreateAdvancedStatisticsInfo, DropAdvancedStatisticsInfo,
+        };
+        let (_temp_dir, db) = test_sqlite_connection().await;
+        let session = session_context_with_information_schema();
+        install_persistent_catalog(&session, "datafusion", db.clone())
+            .await
+            .unwrap();
+        session
+            .sql("CREATE TABLE numbers AS SELECT CAST(1 AS BIGINT) AS x, CAST(2 AS BIGINT) AS y")
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+        let catalog = Catalog::new(db.clone());
+        let relation_id = catalog
+            .reader()
+            .await
+            .unwrap()
+            .get_all_relations()
+            .await
+            .unwrap()[0]
+            .relation_id;
+        let runner =
+            OptdRunner::new_with_persistent_catalog(session.clone(), "datafusion", db.clone());
+        let mut advanced_id = None;
+        for (stage, expected) in [(0, 1000.0), (1, 1000.0), (2, 1.0), (3, 1.0)] {
+            match stage {
+                1 => {
+                    advanced_id = Some(
+                        catalog
+                            .create_advanced_statistics(
+                                catalog.reader().await.unwrap().snapshot_id(),
+                                CreateAdvancedStatisticsInfo {
+                                    relation_id,
+                                    statistics_name: "xy_ndv".into(),
+                                    column_ids: vec![0, 1],
+                                    contents: AdvancedStatisticsContents::JointNdv {
+                                        distinct_count: 999,
+                                    },
+                                },
+                            )
+                            .await
+                            .unwrap(),
+                    );
+                }
+                2 => {
+                    session
+                        .sql("SELECT collect_stats('numbers')")
+                        .await
+                        .unwrap()
+                        .collect()
+                        .await
+                        .unwrap();
+                }
+                3 => {
+                    catalog
+                        .drop_advanced_statistics(
+                            catalog.reader().await.unwrap().snapshot_id(),
+                            DropAdvancedStatisticsInfo {
+                                statistics_id: advanced_id.unwrap(),
+                            },
+                        )
+                        .await
+                        .unwrap();
+                }
+                _ => {}
+            }
+            let plan = runner
+                .parse_logical_plan("SELECT * FROM numbers")
+                .await
+                .unwrap();
+            let planned = runner.optimized_ir_from_logical_plan(&plan).await.unwrap();
+            let mut analyses = planned.analyze();
+            let estimate = analyses
+                .get::<CardinalityEstimationV1>(&planned.query, planned.query.root().unwrap())
+                .unwrap();
+            assert_eq!(estimate.rows.value, expected, "stage {stage}");
+        }
+        drop(catalog);
+        drop(runner);
+        drop(session);
         db.close().await.unwrap();
     }
 

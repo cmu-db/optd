@@ -7,13 +7,13 @@ use datafusion::{
         array::{Array, ArrayRef, Float64Array, StringArray},
         datatypes::DataType,
     },
-    common::{ScalarValue as DFScalarValue, TableReference},
+    common::{ScalarValue as DFScalarValue, TableReference, config::ConfigOptions},
     error::{DataFusionError, Result as DFResult},
+    execution::SessionState,
     logical_expr::{ColumnarValue, ScalarUDF, ScalarUDFImpl, Signature, Volatility},
     prelude::SessionContext,
 };
 use optd_catalog::{
-    Catalog as PersistentCatalog,
     relation::RelationInfo,
     statistics::{
         ColumnStatistics as PersistentColumnStatistics, SetRelationStatisticsInfo, StatisticsValue,
@@ -34,18 +34,50 @@ use crate::{
 pub(crate) const CARDEST_UDF: &str = "cardest";
 pub(crate) const COLLECT_STATS_UDF: &str = "collect_stats";
 
-pub(crate) fn register_statistics_udfs(ctx: &SessionContext, db: DatabaseConnection) {
+pub(crate) fn register_statistics_udfs(
+    ctx: &SessionContext,
+    catalog_name: &str,
+    db: DatabaseConnection,
+) {
     let state = Arc::new(ctx.state());
     ctx.register_udf(ScalarUDF::from(CardinalityEstimateUdf {
         state: IgnoredForEq(Arc::clone(&state)),
         db: IgnoredForEq(db.clone()),
+        catalog_name: catalog_name.to_owned(),
         signature: Signature::exact(vec![DataType::Utf8], Volatility::Volatile),
     }));
     ctx.register_udf(ScalarUDF::from(CollectStatisticsUdf {
         state: IgnoredForEq(state),
         db: IgnoredForEq(db),
+        catalog_name: catalog_name.to_owned(),
         signature: Signature::exact(vec![DataType::Utf8], Volatility::Volatile),
     }));
+}
+
+/// Remove only helpers still owned by this catalog, preserving other catalog bindings
+/// and user replacements of the session-global function names.
+pub(crate) fn unregister_statistics_udfs(ctx: &SessionContext, catalog_name: &str) {
+    let state = ctx.state();
+    let bound_cardest = state
+        .scalar_functions()
+        .get(CARDEST_UDF)
+        .and_then(|udf| {
+            udf.inner()
+                .as_any()
+                .downcast_ref::<CardinalityEstimateUdf>()
+        })
+        .is_some_and(|udf| udf.catalog_name == catalog_name);
+    let bound_collect = state
+        .scalar_functions()
+        .get(COLLECT_STATS_UDF)
+        .and_then(|udf| udf.inner().as_any().downcast_ref::<CollectStatisticsUdf>())
+        .is_some_and(|udf| udf.catalog_name == catalog_name);
+    if bound_cardest {
+        ctx.deregister_udf(CARDEST_UDF);
+    }
+    if bound_collect {
+        ctx.deregister_udf(COLLECT_STATS_UDF);
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -65,6 +97,7 @@ impl<T> std::hash::Hash for IgnoredForEq<T> {
 struct CardinalityEstimateUdf {
     state: IgnoredForEq<Arc<datafusion::execution::SessionState>>,
     db: IgnoredForEq<DatabaseConnection>,
+    catalog_name: String,
     signature: Signature,
 }
 
@@ -72,7 +105,16 @@ struct CardinalityEstimateUdf {
 struct CollectStatisticsUdf {
     state: IgnoredForEq<Arc<datafusion::execution::SessionState>>,
     db: IgnoredForEq<DatabaseConnection>,
+    catalog_name: String,
     signature: Signature,
+}
+
+// Retain the captured registry/runtime, but resolve names using this invocation's
+// configuration. Rebuilding SessionState can replace the shared default catalog.
+fn state_for_execution(state: &SessionState, options: &ConfigOptions) -> Arc<SessionState> {
+    let mut state = state.clone();
+    *state.config_mut().options_mut() = options.clone();
+    Arc::new(state)
 }
 
 impl ScalarUDFImpl for CardinalityEstimateUdf {
@@ -101,15 +143,20 @@ impl ScalarUDFImpl for CardinalityEstimateUdf {
             .as_any()
             .downcast_ref::<StringArray>()
             .expect("string argument type was checked");
+        let execution_state = state_for_execution(&self.state.0, &args.config_options);
         let values = (0..sql.len())
             .map(|index| {
                 if sql.is_null(index) {
                     return Ok(None);
                 }
-                let state = Arc::clone(&self.state.0);
+                let state = Arc::clone(&execution_state);
                 let db = self.db.0.clone();
                 let query = sql.value(index).to_owned();
-                run_async(async move { estimate_cardinality(&state, db, &query).await }).map(Some)
+                let catalog_name = self.catalog_name.clone();
+                run_async(
+                    async move { estimate_cardinality(&state, db, &catalog_name, &query).await },
+                )
+                .map(Some)
             })
             .collect::<DFResult<Vec<_>>>()?;
         Ok(ColumnarValue::Array(Arc::new(Float64Array::from(values))))
@@ -140,10 +187,12 @@ impl ScalarUDFImpl for CollectStatisticsUdf {
         let Some(table) = string_scalar_arg(&args.args[0], COLLECT_STATS_UDF)? else {
             return Ok(ColumnarValue::Scalar(DFScalarValue::Int64(None)));
         };
-        let state = Arc::clone(&self.state.0);
+        let state = state_for_execution(&self.state.0, &args.config_options);
         let db = self.db.0.clone();
-        let snapshot =
-            run_async(async move { collect_and_persist_statistics(&state, db, &table).await })?;
+        let catalog_name = self.catalog_name.clone();
+        let snapshot = run_async(async move {
+            collect_and_persist_statistics(&state, db, &catalog_name, &table).await
+        })?;
         Ok(ColumnarValue::Scalar(DFScalarValue::Int64(Some(snapshot))))
     }
 }
@@ -174,16 +223,23 @@ fn string_array_arg(value: &ColumnarValue) -> DFResult<ArrayRef> {
 async fn collect_and_persist_statistics(
     state: &datafusion::execution::SessionState,
     db: DatabaseConnection,
+    catalog_name: &str,
     table_name: &str,
 ) -> DFResult<i64> {
     let session = SessionContext::from(state.clone());
     let table = TableReference::from(table_name);
+    if !belongs_to_catalog(&table, &session, catalog_name) {
+        return Err(DataFusionError::Execution(format!(
+            "persistent statistics are bound to DataFusion catalog '{catalog_name}'; \
+             cannot collect statistics for '{table}'"
+        )));
+    }
     let provider = session.table_provider(table.clone()).await?;
-    let catalog = PersistentCatalog::new(db);
+    let catalog = crate::persistent_catalog::catalog_for_name(db, catalog_name).await?;
     let reader = catalog.reader().await.map_err(external_error)?;
     let schemas = reader.get_all_schemas().await.map_err(external_error)?;
     let relations = reader.get_all_relations().await.map_err(external_error)?;
-    let relation = resolve_relation(&schemas, &relations, &table, &session)?;
+    let relation = resolve_relation(&schemas, &relations, &table, &session, catalog_name)?;
     let column_names = provider
         .schema()
         .fields()
@@ -230,11 +286,12 @@ async fn collect_and_persist_statistics(
 async fn estimate_cardinality(
     state: &datafusion::execution::SessionState,
     db: DatabaseConnection,
+    catalog_name: &str,
     sql: &str,
 ) -> DFResult<f64> {
     let session = SessionContext::from(state.clone());
     let plan = state.create_logical_plan(sql).await?;
-    let catalog = build_persistent_statistics_catalog(&session, db, &plan).await?;
+    let catalog = build_persistent_statistics_catalog(&session, db, catalog_name, &plan).await?;
     let mut optimizer = optimizer_context_from_logical_plan_with_catalog(&session, &plan, catalog)
         .await
         .map_err(|error| DataFusionError::Plan(error.to_string()))?;
@@ -261,13 +318,19 @@ async fn estimate_cardinality(
 pub(crate) async fn build_persistent_statistics_catalog(
     session: &SessionContext,
     db: DatabaseConnection,
+    catalog_name: &str,
     plan: &datafusion::logical_expr::LogicalPlan,
 ) -> DFResult<Arc<dyn optd_core::Catalog>> {
-    let catalog = PersistentCatalog::new(db);
+    let catalog = crate::persistent_catalog::catalog_for_name(db, catalog_name).await?;
     let reader = catalog.reader().await.map_err(external_error)?;
     let schemas = reader.get_all_schemas().await.map_err(external_error)?;
     let relations = reader.get_all_relations().await.map_err(external_error)?;
-    let memory = Arc::new(MemoryCatalog::new("datafusion", "public"));
+    let config = session.copied_config();
+    let defaults = &config.options().catalog;
+    let memory = Arc::new(MemoryCatalog::new(
+        &defaults.default_catalog,
+        &defaults.default_schema,
+    ));
 
     for scan in referenced_scan_columns(plan) {
         let provider = session.table_provider(scan.table.clone()).await?;
@@ -275,7 +338,8 @@ pub(crate) async fn build_persistent_statistics_catalog(
         memory
             .create_table(table_ref.clone(), provider.schema(), None)
             .map_err(external_error)?;
-        let Some(relation) = resolve_relation_optional(&schemas, &relations, &scan.table, session)
+        let Some(relation) =
+            resolve_relation_optional(&schemas, &relations, &scan.table, session, catalog_name)
         else {
             continue;
         };
@@ -336,8 +400,9 @@ fn resolve_relation<'a>(
     relations: &'a [RelationInfo],
     table: &TableReference,
     session: &SessionContext,
+    catalog_name: &str,
 ) -> DFResult<&'a RelationInfo> {
-    resolve_relation_optional(schemas, relations, table, session).ok_or_else(|| {
+    resolve_relation_optional(schemas, relations, table, session, catalog_name).ok_or_else(|| {
         DataFusionError::Execution(format!(
             "relation '{table}' is not present in the persistent catalog"
         ))
@@ -349,7 +414,11 @@ fn resolve_relation_optional<'a>(
     relations: &'a [RelationInfo],
     table: &TableReference,
     session: &SessionContext,
+    catalog_name: &str,
 ) -> Option<&'a RelationInfo> {
+    if !belongs_to_catalog(table, session, catalog_name) {
+        return None;
+    }
     let default_schema = session
         .copied_config()
         .options()
@@ -363,6 +432,18 @@ fn resolve_relation_optional<'a>(
     relations.iter().find(|relation| {
         relation.schema_id == schema.schema_id && relation.relation_name == table.table()
     })
+}
+
+fn belongs_to_catalog(
+    table: &TableReference,
+    session: &SessionContext,
+    catalog_name: &str,
+) -> bool {
+    let config = session.copied_config();
+    table
+        .catalog()
+        .unwrap_or(&config.options().catalog.default_catalog)
+        == catalog_name
 }
 
 fn to_persistent_value(value: ScalarValue) -> Option<StatisticsValue> {

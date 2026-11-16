@@ -25,6 +25,7 @@ where
                 .add(schema::Column::EndSnapshot.gt(snapshot_id)),
         )
         .select_only()
+        .column(schema::Column::CatalogId)
         .column(schema::Column::SchemaId)
         .column(schema::Column::SchemaName)
         .order_by_asc(schema::Column::SchemaName)

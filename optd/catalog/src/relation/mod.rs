@@ -7,7 +7,7 @@ use crate::entity::column::{self, ColumnType};
 
 pub use crate::entity::relation::{RelationKind, StorageKind};
 pub(crate) use create_relation::*;
-pub use drop_relation::*;
+pub(crate) use drop_relation::*;
 pub(crate) use get_all_relations::*;
 pub(crate) use get_relation::*;
 

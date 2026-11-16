@@ -11,6 +11,7 @@ use crate::{
 
 pub(crate) async fn create_relation<C>(
     info: CreateRelationInfo,
+    catalog_id: i64,
     relation_id: i64,
     db: &C,
     read_snapshot: i64,
@@ -29,6 +30,7 @@ where
                 .add(schema::Column::EndSnapshot.is_null())
                 .add(schema::Column::EndSnapshot.gt(read_snapshot)),
         )
+        .filter(schema::Column::CatalogId.eq(catalog_id))
         .filter(schema::Column::SchemaName.eq(schema_name))
         .select_only()
         .column(schema::Column::SchemaId)

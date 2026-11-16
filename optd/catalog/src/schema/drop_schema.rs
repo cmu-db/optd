@@ -8,7 +8,7 @@ use crate::{
     schema::DropSchemaInfo,
 };
 
-pub async fn drop_schema<C>(
+pub(crate) async fn drop_schema<C>(
     info: DropSchemaInfo,
     db: &C,
     read_snapshot: i64,

@@ -16,13 +16,17 @@ where
         .select_only()
         .column(snapshot::Column::SnapshotId)
         .column(snapshot::Column::NextCatalogId)
-        .into_tuple::<(i64, i64)>()
+        .column(snapshot::Column::SchemaVersion)
+        .into_tuple::<(i64, i64, i64)>()
         .one(db)
         .await
         .map(|row| {
-            row.map(|(snapshot_id, next_catalog_id)| SnapshotInfo {
-                snapshot_id: SnapshotId::from_raw(snapshot_id),
-                next_catalog_id,
-            })
+            row.map(
+                |(snapshot_id, next_catalog_id, schema_version)| SnapshotInfo {
+                    schema_version,
+                    snapshot_id: SnapshotId::from_raw(snapshot_id),
+                    next_catalog_id,
+                },
+            )
         })
 }

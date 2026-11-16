@@ -1,5 +1,11 @@
 # Catalog implementation handoff
 
+> Historical handoff for the original branch-based implementation. It is
+> superseded by [catalog_single_history.md](catalog_single_history.md), which
+> specifies the current metadata-only scope, global snapshot publication,
+> namespace ownership, and non-destructive migration. File ownership, branch
+> heads, and view/constraint implementation below are not current requirements.
+
 ## Decision summary
 
 - Build the catalog in `optd/catalog` with package name `optd-catalog`.

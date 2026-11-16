@@ -1,25 +1,46 @@
 //! Demonstrates persistent statistics and catalog snapshot advancement.
 
-use std::{error::Error, path::PathBuf};
+use std::{
+    error::Error,
+    fs::OpenOptions,
+    path::PathBuf,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use datafusion::arrow::array::{Float64Array, Int64Array};
 use optd_catalog::Catalog;
 use optd_datafusion::{
     persistent_catalog::install_persistent_catalog, setup::session_context_with_information_schema,
 };
-use sea_orm::Database;
+use sea_orm::{
+    SqlxSqliteConnector,
+    sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions},
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let path = std::env::args_os()
-        .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::temp_dir().join("optd-statistics-demo.sqlite"));
-    if path.exists() {
-        std::fs::remove_file(&path)?;
-    }
-
-    let db = Database::connect(format!("sqlite://{}?mode=rwc", path.display())).await?;
+    let path = match std::env::args_os().nth(1) {
+        Some(path) => PathBuf::from(path),
+        None => std::env::temp_dir().join(format!(
+            "optd-statistics-demo-{}-{}.sqlite",
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos()
+        )),
+    };
+    // Reserve a new file atomically. Never reset an existing caller-supplied path.
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)?;
+    // Use an absolute literal filename, not a URL (or SQLite's `file:` URI syntax).
+    let options = SqliteConnectOptions::new()
+        .filename(path.canonicalize()?)
+        .create_if_missing(false);
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(options)
+        .await?;
+    let db = SqlxSqliteConnector::from_sqlx_sqlite_pool(pool);
     let session = session_context_with_information_schema();
     install_persistent_catalog(&session, "datafusion", db.clone()).await?;
     session

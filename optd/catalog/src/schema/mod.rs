@@ -7,8 +7,8 @@ use sea_orm::DerivePartialModel;
 
 use crate::entity::schema;
 
-pub use create_schema::*;
-pub use drop_schema::*;
+pub(crate) use create_schema::*;
+pub(crate) use drop_schema::*;
 pub(crate) use get_all_schemas::*;
 pub(crate) use get_schema::*;
 
@@ -30,6 +30,7 @@ pub struct GetSchemaInfo {
 #[derive(Debug, Clone, PartialEq, DerivePartialModel)]
 #[sea_orm(entity = "schema::Entity")]
 pub struct SchemaInfo {
+    pub catalog_id: i64,
     pub schema_id: i64,
     pub schema_name: String,
 }

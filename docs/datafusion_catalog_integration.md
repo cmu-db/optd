@@ -51,14 +51,30 @@ nullability are treated as an already-imported provider. The CLI uses this scope
 only while registering JOB or TPC-H providers, so a new process can rebuild its
 runtime providers without replacing durable metadata or advancing the snapshot.
 A mismatched definition remains a name conflict. Each persistent mutation reads
-the current branch head and supplies that snapshot as the expected base. The
-catalog's conditional branch-head publication remains the serialization point.
+the latest global snapshot and supplies it as the expected base. The catalog's
+shared commit layer serializes writers, rejects stale bases, and atomically
+publishes metadata, the new snapshot, and a typed summary without branch heads.
+See [catalog_single_history.md](catalog_single_history.md) for the upstream comparison
+and offline migration procedure.
 
 `install_persistent_catalog` enables the adapter for a named DataFusion catalog;
 `uninstall_persistent_catalog` restores the exact wrapped provider. Reinstalling
 wraps that same provider again, so runtime tables remain available. DDL executed
 while persistence is disabled is intentionally not backfilled into
 `optd-catalog`, and repeated installation is idempotent.
+
+Persistent statistics are bound to the DataFusion catalog named during installation.
+`collect_stats` rejects references to other catalogs without publishing a snapshot.
+Bare and schema-qualified references resolve using the execution-time session
+configuration, including later `SET`/`RESET` changes to default catalog/schema,
+not the defaults captured at installation or the installed catalog name. `cardest` and persistent runners use fallback
+estimates for foreign-catalog tables rather than attaching same-named durable
+statistics. `OptdRunner::new_with_persistent_catalog` takes the catalog name
+explicitly alongside the database connection. The SQL UDF names are session-global;
+installing another persistent catalog rebinds those helpers to that catalog.
+Each installed catalog has a durable registration and catalog-owned schemas, so
+multiple DataFusion catalogs can share one metadata database without aliasing
+same-named relations. DDL and statistics use scoped catalog handles.
 
 DataFusion provider methods are synchronous while SeaORM is asynchronous. The
 initial adapter isolates that mismatch in a small bridge that runs each owned
@@ -91,18 +107,32 @@ atomically. Tests must cover compensation paths as catalog behavior expands.
 - View registration is rejected until `optd_view_definition` and `create_view`
   exist. Authoritative SQL must come from the DDL plan rather than from a generic
   `TableProvider`.
+- `DROP SCHEMA ... CASCADE` for a populated persistent schema is explicitly
+  unsupported and rejected before removing anything from the runtime registry.
+  Empty-schema drops and restrictive drops keep their existing behavior.
 - Temporary tables and views remain DataFusion concerns and are not persisted.
 - The initial persistent-statistics UDFs are documented in
   [persistent_statistics_demo.md](persistent_statistics_demo.md). Statistics
-  payloads use the unified catalog snapshot interval; DataFusion DML still needs
-  to publish through that path so successful writes close visible payloads.
-- PostgreSQL concurrency coverage remains deferred; SQLite exercises DDL
-  mirroring, historical visibility, and branch publication.
+  payloads use the unified catalog snapshot interval. Table lookups return original
+  source providers and retain their native write capabilities and unsupported errors.
+  Use the shared [observed executor](observed_execution.md) for both DML and DDL.
+  The runner uses that same path even when optd optimization is disabled. It collects
+  actual DDL write-through receipts without double publication, and invalidates both
+  basic and advanced statistics after tracked DML attempts. Source errors are
+  conservatively treated as possibly partial writes. Source results and metadata
+  failure/pending status are separate; source SQL must not be replayed to repair
+  a metadata failure. Raw session/provider calls and external writes require explicit
+  notification. Source/catalog atomicity and automatic source freshness are not claimed.
+- Catalog migration/publication concurrency is covered by SQLite tests and opt-in
+  local PostgreSQL tests. The DataFusion provider compensation tests use SQLite;
+  they do not establish distributed atomicity with external table storage.
 
 ## Next integration steps
 
-1. Route successful DML through catalog snapshot publication and statistics
-   invalidation.
+1. Extend observation with trustworthy source transaction/commit notifications and
+   durable reconciliation if required. Compatible historical-statistics fallback
+   remains a separate policy change; current invalidation uses default estimates.
+   Preserve native provider capabilities rather than inventing unsupported DML.
 2. Add a file-definition payload for external tables and preserve location,
    format, and options from `CreateExternalTable`.
 3. Add `optd_view_definition` and route `CreateView`/`DropView` through typed

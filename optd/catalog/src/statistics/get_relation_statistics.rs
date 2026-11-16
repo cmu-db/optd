@@ -80,6 +80,15 @@ pub(crate) async fn get_relation_statistics<C: ConnectionTrait>(
             })
         })
         .collect::<CatalogResult<Vec<_>>>()?;
+    if let Some(pair) = columns
+        .windows(2)
+        .find(|pair| pair[0].column_id == pair[1].column_id)
+    {
+        return Err(CatalogError::DuplicateColumnStatistics {
+            relation_id,
+            column_id: pair[0].column_id,
+        });
+    }
 
     Ok(Some(RelationStatistics {
         statistics_id: definition.statistics_id,
@@ -106,9 +115,75 @@ fn decode_count(field: &'static str, value: Option<i64>) -> CatalogResult<Option
 }
 
 fn decode_value(value: Option<String>) -> CatalogResult<Option<StatisticsValue>> {
+    // The v1 writer previously serialized NaN and infinities as {"Float64":null}.
+    // Recover exactly that lossy shape as unknown, not every malformed bound. The
+    // typed helper rejects extra/duplicate fields, and avoids decoding valid i128
+    // decimals through serde_json::Value (which could lose integer precision).
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct LegacyNonFiniteFloat {
+        #[serde(rename = "Float64")]
+        _value: (),
+    }
+
     value
         .map(|value| {
-            serde_json::from_str(&value).map_err(|source| CatalogError::StatisticsValue { source })
+            if serde_json::from_str::<LegacyNonFiniteFloat>(&value).is_ok() {
+                return Ok(None);
+            }
+            serde_json::from_str::<StatisticsValue>(&value)
+                .map(Some)
+                .map_err(|source| CatalogError::StatisticsValue { source })
         })
         .transpose()
+        .map(Option::flatten)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_non_finite_statistics_bounds_are_unknown() {
+        for encoded in ["{\"Float64\":null}", "{ \"Float64\" : null }"] {
+            assert_eq!(decode_value(Some(encoded.to_owned())).unwrap(), None);
+        }
+        assert_eq!(decode_value(None).unwrap(), None);
+    }
+
+    #[test]
+    fn finite_statistics_bounds_round_trip_and_malformed_bounds_still_fail() {
+        for value in [f64::MIN, -0.0, 0.0, 1.5, f64::MAX] {
+            let encoded = serde_json::to_string(&StatisticsValue::Float64(value)).unwrap();
+            let Some(StatisticsValue::Float64(decoded)) = decode_value(Some(encoded)).unwrap()
+            else {
+                panic!("finite Float64 must be preserved");
+            };
+            assert_eq!(value.to_bits(), decoded.to_bits());
+        }
+        assert_eq!(
+            decode_value(Some("{\"Int64\":42}".into())).unwrap(),
+            Some(StatisticsValue::Int64(42))
+        );
+        let decimal = StatisticsValue::Decimal128 {
+            value: 10_i128.pow(37) + 1,
+            precision: 38,
+            scale: 0,
+        };
+        assert_eq!(
+            decode_value(Some(serde_json::to_string(&decimal).unwrap())).unwrap(),
+            Some(decimal)
+        );
+        for encoded in [
+            "broken",
+            "{}",
+            "null",
+            "{\"Int64\":null}",
+            "{\"Float64\":\"Infinity\"}",
+            "{\"Float64\":null,\"extra\":1}",
+            "{\"Float64\":1.0,\"Float64\":null}",
+        ] {
+            assert!(decode_value(Some(encoded.to_owned())).is_err(), "{encoded}");
+        }
+    }
 }
