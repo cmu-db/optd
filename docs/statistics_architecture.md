@@ -54,11 +54,10 @@ the encoding version; HyperLogLog additionally records precision and hash seed. 
 installation validate sketch shape, counter bounds, population, and encoding compatibility.
 
 A scan prefers exact catalog cardinality over an installed HLL; HLL is used when no exact
-cardinality is available. SpaceSaving improves equality filters, skewed equality-join pair counts,
-and directional semi/anti key coverage. For an inner join, tracked values
-contribute their frequency cross-products; for left-side coverage, a tracked left frequency
-contributes once when the value is known to occur on the right, independent of right-side duplicate
-multiplicity. The untracked remainder uses the NDV-overlap model. Classic HLL is forbidden for set-intersection estimation: inclusion-exclusion subtracts noisy
+cardinality is available. SpaceSaving improves equality filters and skewed equality-join pair counts, but does not supply
+semi/anti coverage. For an inner join, tracked values contribute their frequency cross-products.
+Semi/anti equality selectivity instead follows PostgreSQL's NDV/MCV policy; current-population
+catalog MCVs contribute matched left frequencies once, independent of right-side multiplicity. Classic HLL is forbidden for set-intersection estimation: inclusion-exclusion subtracts noisy
 cardinality estimates and is practically unstable, especially for small overlaps. It currently
 improves the join domain estimate only through per-column NDV. Use an intersection-capable
 Theta/KMV sketch or sampled overlap when available.
@@ -123,11 +122,17 @@ keeping equality reasoning independent of estimator internals.
 Equality estimation separates two quantities:
 
 - pair selectivity estimates matching tuple pairs for inner joins;
-- directional coverage estimates the probability that a preserved-side row has at least one
-  partner for semi/anti joins.
+- semi/anti selectivity estimates the fraction of preserved-side rows with partners, using
+  PostgreSQL 17's `eqjoinsel_semi` policy rather than a custom match-probability model.
 
-For left coverage, the uniform fallback is
-`left_non_null_fraction * intersection_ndv / left_ndv`. The containment fallback sets
+Semi/anti equality uses matched left MCV frequencies plus NDV-ratio estimation of the uncertain
+non-null remainder. Default NDVs use 0.5; only the right NDV is additionally capped by right rows.
+Each equality is capped by `right_rows * inner_pair_selectivity`, and conjuncts multiply directly.
+There is no residual-fanout exponent or SpaceSaving coverage floor. See
+[the estimator documentation](cardinality_estimation_v1.md#join-estimation) for the source reference,
+NULL-safe adaptation, and retained independence assumptions.
+
+For inner-pair domain estimation, the containment fallback sets
 `intersection_ndv = min(left_ndv, right_ndv)`. When compatible ordered bounds are available,
 disjoint ranges prove a zero intersection and numeric/date ranges scale each side's NDV by the
 fraction of its range in the overlap. This remains a uniform approximation; histograms and samples are the planned replacement. For a
@@ -143,11 +148,9 @@ uniqueness shortcut is not reused once row provenance becomes derived. A single-
 complete, unfiltered referenced population proves that every surviving non-null local row has a
 partner. Filtering the referenced side invalidates that coverage guarantee.
 
-Semi-join output profiles apply occupancy thinning to unrelated columns and cap equality-key NDV by
-the estimated intersection domain. Ordinary equality makes the surviving key non-null. For a pure
-single-key anti join, the key's unmatched non-null frequency and NDV are the directional complements
-of matched coverage; with multiple keys or residual predicates, the conservative occupancy fallback
-is retained because a row may fail for another reason.
+Semi/anti output profiles use ordinary occupancy thinning and row-count caps without inferring
+matched or complementary unmatched key domains from a semi selectivity. Ordinary equality makes
+the surviving semi-join key non-null; anti joins do not inherit that fact.
 
 ## Filtered NDV propagation
 

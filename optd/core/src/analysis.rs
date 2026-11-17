@@ -2790,13 +2790,7 @@ fn join_profile_from_conjuncts_with_config(
         "join_profile_from_conjuncts requires atomic conjuncts"
     );
     let estimate = join_selectivity_from_conjuncts_with_config(
-        left,
-        right,
-        conjuncts,
-        matches!(join_type, JoinType::Inner),
-        ctx,
-        config,
-        catalog,
+        left, right, conjuncts, &join_type, ctx, config, catalog,
     );
     join_profile_with_selectivity_and_classes(left, right, join_type, estimate)
 }
@@ -2808,8 +2802,6 @@ fn join_profile_with_selectivity_and_classes(
     estimate: JoinSelectivityEstimate,
 ) -> CardinalityProfile {
     let non_null_equality_columns = estimate.non_null_equality_columns.clone();
-    let left_equality_coverages = estimate.left_equality_coverages.clone();
-    let residual_selectivity = estimate.residual_selectivity;
     let selectivity = estimate.selectivity;
     // Point estimate uses pair selectivity; upper is the independent product bound, then
     // tightened by selectivity (never above the cross-product of input uppers).
@@ -2826,18 +2818,10 @@ fn join_profile_with_selectivity_and_classes(
         inner_upper,
     );
     match join_type {
-        JoinType::LeftSemi => semi_join_profile(
-            left,
-            estimate.match_probability.value,
-            &non_null_equality_columns,
-            &left_equality_coverages,
-        ),
-        JoinType::LeftAnti => anti_join_profile(
-            left,
-            estimate.match_probability.value,
-            &left_equality_coverages,
-            residual_selectivity,
-        ),
+        JoinType::LeftSemi => {
+            semi_join_profile(left, selectivity.value, &non_null_equality_columns)
+        }
+        JoinType::LeftAnti => anti_join_profile(left, selectivity.value),
         JoinType::Single => single_join_profile(left, right),
         JoinType::LeftOuter => combine_join_columns(
             left,
@@ -2913,7 +2897,6 @@ fn join_profile_with_selectivity_and_classes(
                 false,
             );
             mark_columns_non_null(&mut profile, &non_null_equality_columns);
-            apply_equality_intersection_domains(&mut profile, &left_equality_coverages);
             profile
         }
     }
@@ -2954,42 +2937,13 @@ fn single_join_profile(
 
 fn semi_join_profile(
     input: &CardinalityProfile,
-    match_probability: f64,
+    selectivity: f64,
     non_null_equality_columns: &BTreeSet<Column>,
-    left_equality_coverages: &[LeftEqualityCoverage],
 ) -> CardinalityProfile {
-    let match_probability = match_probability.clamp(0.0, 1.0);
-    let rows = Estimate::derived(
-        (input.rows.value * match_probability).clamp(0.0, input.rows.value),
-        Some(0.0),
-        input.rows.upper,
-    );
-    let mut profile = scale_profile(input.clone(), match_probability, None);
-    profile.rows = rows.clone();
-    for column_profile in profile.columns.values_mut() {
-        column_profile.cap_by_rows_mut(&rows);
-    }
-    for coverage in left_equality_coverages {
-        let Some(column_profile) = profile.columns.get_mut(&coverage.column) else {
-            continue;
-        };
-        column_profile.distinct = column_profile
-            .distinct
-            .cap(coverage.intersection_distinct, EstimateSource::Derived);
-        if coverage.ordinary_non_null {
-            column_profile.frequency = rows.clone();
-        } else {
-            let edge_match = coverage.non_null_match_probability + coverage.null_match_probability;
-            let conditional_non_null = if edge_match <= 0.0 {
-                0.0
-            } else {
-                (coverage.non_null_match_probability / edge_match).clamp(0.0, 1.0)
-            };
-            column_profile.frequency =
-                Estimate::derived(rows.value * conditional_non_null, Some(0.0), rows.upper);
-        }
-        column_profile.cap_by_rows_mut(&rows);
-    }
+    let selectivity = selectivity.clamp(0.0, 1.0);
+    let rows = Estimate::derived(input.rows.value * selectivity, Some(0.0), input.rows.upper);
+    let mut profile = scale_profile(input.clone(), selectivity, None);
+    profile.rows = rows;
     mark_columns_non_null(&mut profile, non_null_equality_columns);
     profile
 }
@@ -3002,47 +2956,15 @@ fn mark_columns_non_null(profile: &mut CardinalityProfile, columns: &BTreeSet<Co
     }
 }
 
-fn anti_join_profile(
-    input: &CardinalityProfile,
-    match_probability: f64,
-    left_equality_coverages: &[LeftEqualityCoverage],
-    residual_selectivity: f64,
-) -> CardinalityProfile {
-    let unmatched_probability = 1.0 - match_probability.clamp(0.0, 1.0);
+fn anti_join_profile(input: &CardinalityProfile, selectivity: f64) -> CardinalityProfile {
+    let surviving_fraction = 1.0 - selectivity.clamp(0.0, 1.0);
     let rows = Estimate::derived(
-        (input.rows.value * unmatched_probability).clamp(0.0, input.rows.value),
+        input.rows.value * surviving_fraction,
         Some(0.0),
         input.rows.upper,
     );
-    let mut profile = scale_profile(input.clone(), unmatched_probability, None);
-    profile.rows = rows.clone();
-    for column_profile in profile.columns.values_mut() {
-        column_profile.cap_by_rows_mut(&rows);
-    }
-
-    // For one pure equality, unmatched non-null mass and domain are the complement of directional
-    // coverage. With multiple keys or residual predicates, a row can fail for another reason, so
-    // subtracting every key domain would be unsound and the occupancy fallback is retained.
-    if left_equality_coverages.len() == 1 && residual_selectivity == 1.0 {
-        let coverage = left_equality_coverages[0];
-        if let Some(column_profile) = profile.columns.get_mut(&coverage.column) {
-            let unmatched_non_null_probability =
-                (coverage.input_non_null_fraction - coverage.non_null_match_probability).max(0.0);
-            column_profile.frequency = Estimate::derived(
-                (input.rows.value * unmatched_non_null_probability).min(rows.value),
-                Some(0.0),
-                rows.upper,
-            );
-            let unmatched_distinct =
-                (coverage.input_distinct - coverage.intersection_distinct).max(0.0);
-            column_profile.distinct = Estimate::derived(
-                unmatched_distinct.min(column_profile.frequency.value),
-                Some(0.0),
-                Some(unmatched_distinct.min(column_profile.frequency.value)),
-            );
-            column_profile.cap_by_rows_mut(&rows);
-        }
-    }
+    let mut profile = scale_profile(input.clone(), surviving_fraction, None);
+    profile.rows = rows;
     profile
 }
 
@@ -3131,35 +3053,6 @@ fn cap_equivalent_column_distinct_counts(profile: &mut CardinalityProfile) {
     }
 }
 
-/// After an inner equi-join, shrink join-key / eq-class NDVs to the equality intersection domain.
-fn apply_equality_intersection_domains(
-    profile: &mut CardinalityProfile,
-    coverages: &[LeftEqualityCoverage],
-) {
-    for coverage in coverages {
-        let intersection = coverage.intersection_distinct.max(0.0);
-        if let Some(column_profile) = profile.columns.get_mut(&coverage.column) {
-            column_profile.distinct = column_profile
-                .distinct
-                .cap(intersection, EstimateSource::Derived);
-        }
-        for class in &mut profile.equivalence_classes {
-            if !class.columns.contains(&coverage.column) {
-                continue;
-            }
-            class.distinct = class.distinct.cap(intersection, EstimateSource::Derived);
-            let class_distinct = class.distinct.value;
-            for column in &class.columns {
-                if let Some(column_profile) = profile.columns.get_mut(column) {
-                    column_profile.distinct = column_profile
-                        .distinct
-                        .cap(class_distinct, EstimateSource::Derived);
-                }
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 fn join_selectivity(
     left: &CardinalityProfile,
@@ -3171,7 +3064,7 @@ fn join_selectivity(
         left,
         right,
         conjuncts,
-        true,
+        &JoinType::Inner,
         ctx,
         &CardinalityEstimationConfig::default(),
         None,
@@ -3186,9 +3079,6 @@ fn join_selectivity(
 struct JoinSelectivityEstimate {
     selectivity: Estimate,
     equivalence_classes: Vec<ColumnEquivalenceClass>,
-    match_probability: Estimate,
-    left_equality_coverages: Vec<LeftEqualityCoverage>,
-    residual_selectivity: f64,
     non_null_equality_columns: BTreeSet<Column>,
     #[cfg(test)]
     equivalence_state_columns: usize,
@@ -3205,7 +3095,7 @@ fn join_selectivity_from_conjuncts(
         left,
         right,
         conjuncts,
-        true,
+        &JoinType::Inner,
         ctx,
         &CardinalityEstimationConfig::default(),
         None,
@@ -3216,15 +3106,18 @@ fn join_selectivity_from_conjuncts_with_config(
     left: &CardinalityProfile,
     right: &CardinalityProfile,
     conjuncts: &[Expr],
-    composite_inner_join: bool,
+    join_type: &JoinType,
     ctx: &QueryContext,
     config: &CardinalityEstimationConfig,
     catalog: Option<&dyn Catalog>,
 ) -> JoinSelectivityEstimate {
+    let semi_or_anti = matches!(join_type, JoinType::LeftSemi | JoinType::LeftAnti);
     let mut equality_pairs = Vec::new();
     let mut residual_selectivity = 1.0;
     for &predicate in conjuncts {
-        if let Some((left_col, right_col)) = column_equality(predicate, ctx) {
+        if let Some((left_col, right_col)) = column_equality(predicate, ctx)
+            && (!semi_or_anti || oriented_join_columns(left_col, right_col, left, right).is_some())
+        {
             let null_safe = matches!(
                 predicate.get(ctx),
                 ExprData::Binary {
@@ -3295,7 +3188,7 @@ fn join_selectivity_from_conjuncts_with_config(
     });
     // TODO(ce): consume catalog joint NDVs / multi-column histograms for composite edges and
     // correlated residuals beyond leading schema-prefix HLLs.
-    let composite = composite_inner_join
+    let composite = matches!(join_type, JoinType::Inner)
         .then(|| composite_join_estimate(&equality_edges, &classes, left, right, catalog))
         .flatten();
     let covered_edges = composite
@@ -3305,11 +3198,6 @@ fn join_selectivity_from_conjuncts_with_config(
     let mut equality_selectivity = composite
         .as_ref()
         .map_or(1.0, |estimate| estimate.pair_selectivity);
-    let mut equality_match_probability = composite
-        .as_ref()
-        .map_or(1.0, |estimate| estimate.left_match_probability);
-    let mut left_equality_coverages = Vec::new();
-    let mut has_cross_input_equality = composite.is_some();
     for edge in equality_edges {
         let normalized_edge = oriented_join_columns(edge.left, edge.right, left, right)
             .map(|(left_column, right_column, _, _)| (left_column, right_column));
@@ -3329,7 +3217,6 @@ fn join_selectivity_from_conjuncts_with_config(
             .is_some_and(|estimate| estimate.domains_disjoint)
         {
             equality_selectivity = 0.0;
-            equality_match_probability = 0.0;
         }
         if classes.equivalent(edge.left, edge.right) {
             continue;
@@ -3338,106 +3225,49 @@ fn join_selectivity_from_conjuncts_with_config(
         // min(left_ndv, right_ndv) via chosen_ndv). Partial range overlap can be strictly smaller.
         let mut domain_ndv = edge.chosen_ndv.clone();
         if let Some(edge_estimate) = edge_estimate {
-            has_cross_input_equality = true;
-            equality_selectivity *= edge_estimate.pair_selectivity;
-            equality_match_probability *= edge_estimate.left_match_probability;
-            if let Some(coverage) = edge_estimate.left_coverage {
+            equality_selectivity *= if semi_or_anti {
+                equality_semi_selectivity(
+                    &edge,
+                    left,
+                    right,
+                    edge_estimate.pair_selectivity,
+                    catalog,
+                )
+            } else {
+                edge_estimate.pair_selectivity
+            };
+            if let Some(intersection_distinct) = edge_estimate.intersection_distinct {
                 domain_ndv = Estimate::derived(
-                    coverage.intersection_distinct,
+                    intersection_distinct,
                     Some(0.0),
-                    Some(coverage.intersection_distinct),
+                    Some(intersection_distinct),
                 );
-                left_equality_coverages.push(coverage);
             }
         }
         classes.union(edge.left, edge.right, domain_ndv);
     }
 
-    let selectivity = (equality_selectivity * residual_selectivity).clamp(0.0, 1.0);
-    let first_moment_upper = (right.rows.value * selectivity).clamp(0.0, 1.0);
-    let match_probability = if has_cross_input_equality {
-        residual_match_probability(
-            equality_match_probability,
-            equality_selectivity,
-            right.rows.value,
-            residual_selectivity,
-        )
+    // PostgreSQL combines SEMI/ANTI clause selectivities directly, without a fanout model.
+    let selectivity = if semi_or_anti && (left.rows.value <= 0.0 || right.rows.value <= 0.0) {
+        0.0
     } else {
-        // With no equality-domain coverage information, retain the first-moment heuristic. It is
-        // an upper bound when pair selectivity is exact, not a calibrated existence probability.
-        first_moment_upper
+        (equality_selectivity * residual_selectivity).clamp(0.0, 1.0)
     };
     #[cfg(test)]
     let equivalence_state_columns = classes.tracked_column_count();
     JoinSelectivityEstimate {
         selectivity: Estimate::derived(selectivity, Some(0.0), Some(1.0)),
         equivalence_classes: classes.into_classes(),
-        match_probability: Estimate::derived(
-            match_probability,
-            Some(0.0),
-            Some(first_moment_upper.max(match_probability)),
-        ),
-        left_equality_coverages,
-        residual_selectivity,
         non_null_equality_columns,
         #[cfg(test)]
         equivalence_state_columns,
     }
 }
 
-/// Estimates the probability that at least one equality-join candidate survives residual
-/// predicates. `equality_selectivity * right_rows` is the expected number of equality pairs per
-/// left row; conditional on a left row having a match, that yields the estimated fanout. Under an
-/// independent residual-predicate model, at least one of those candidates survives with probability
-/// `1 - (1 - residual_selectivity)^fanout`.
-fn residual_match_probability(
-    equality_match_probability: f64,
-    equality_selectivity: f64,
-    right_rows: f64,
-    residual_selectivity: f64,
-) -> f64 {
-    let equality_match_probability = equality_match_probability.clamp(0.0, 1.0);
-    let residual_selectivity = residual_selectivity.clamp(0.0, 1.0);
-    if equality_match_probability == 0.0 || residual_selectivity == 0.0 {
-        return 0.0;
-    }
-    if residual_selectivity == 1.0 {
-        return equality_match_probability;
-    }
-
-    let conditional_fanout =
-        residual_conditional_fanout(equality_match_probability, equality_selectivity, right_rows);
-    let survives_given_match = 1.0 - (1.0 - residual_selectivity).powf(conditional_fanout);
-    (equality_match_probability * survives_given_match).clamp(0.0, 1.0)
-}
-
-fn residual_conditional_fanout(
-    equality_match_probability: f64,
-    equality_selectivity: f64,
-    right_rows: f64,
-) -> f64 {
-    if equality_match_probability <= 0.0 {
-        return 0.0;
-    }
-    (right_rows * equality_selectivity / equality_match_probability).max(1.0)
-}
-
-#[derive(Debug, Clone, Copy)]
-struct LeftEqualityCoverage {
-    column: Column,
-    input_distinct: f64,
-    input_non_null_fraction: f64,
-    intersection_distinct: f64,
-    non_null_match_probability: f64,
-    null_match_probability: f64,
-    ordinary_non_null: bool,
-}
-
 #[derive(Debug, Clone, Copy)]
 struct EqualityEdgeEstimate {
     pair_selectivity: f64,
-    left_match_probability: f64,
-    left_coverage: Option<LeftEqualityCoverage>,
+    intersection_distinct: Option<f64>,
     domains_disjoint: bool,
 }
 
@@ -3448,40 +3278,33 @@ fn equality_edge_estimate(
     catalog: Option<&dyn Catalog>,
     _ctx: &QueryContext,
 ) -> EqualityEdgeEstimate {
-    let first = edge.left;
-    let second = edge.right;
-    let null_safe = edge.null_safe;
     let Some((left_column, right_column, left_profile, right_profile)) =
-        oriented_join_columns(first, second, left, right)
+        oriented_join_columns(edge.left, edge.right, left, right)
     else {
-        let pair_selectivity = 1.0
-            / join_column_distinct(first, left, right)
-                .max(join_column_distinct(second, left, right))
-                .max(1.0);
         return EqualityEdgeEstimate {
-            pair_selectivity,
-            left_match_probability: (right.rows.value * pair_selectivity).clamp(0.0, 1.0),
-            left_coverage: None,
+            pair_selectivity: 1.0
+                / join_column_distinct(edge.left, left, right)
+                    .max(join_column_distinct(edge.right, left, right))
+                    .max(1.0),
+            intersection_distinct: None,
             domains_disjoint: false,
         };
     };
 
     let left_base = base_column(left_profile);
     let right_base = base_column(right_profile);
-    let (left_distinct_hint, right_distinct_hint) = if left_column == first {
+    let (left_hint, right_hint) = if left_column == edge.left {
         (edge.left_ndv.value, edge.right_ndv.value)
     } else {
         (edge.right_ndv.value, edge.left_ndv.value)
     };
-    // Postgres eqjoinsel_semi clamps NDVs by the represented population (Leis et al. cite this
-    // inclusion machinery). Inflated NDVs otherwise force near-certain matches and crush anti joins.
     let left_distinct = effective_join_distinct(left, left_profile, left_base, catalog)
-        .max(left_distinct_hint)
+        .max(left_hint)
         .min(left_profile.frequency.value)
         .min(left.rows.value)
         .max(0.0);
     let right_distinct = effective_join_distinct(right, right_profile, right_base, catalog)
-        .max(right_distinct_hint)
+        .max(right_hint)
         .min(right_profile.frequency.value)
         .min(right.rows.value)
         .max(0.0);
@@ -3489,141 +3312,153 @@ fn equality_edge_estimate(
         estimated_distinct_intersection(left_profile, right_profile, left_distinct, right_distinct);
     let left_non_null = join_column_non_null_fraction(left_column, left, right);
     let right_non_null = join_column_non_null_fraction(right_column, left, right);
-    let left_has_null = left.rows.value > left_profile.frequency.value;
-    let right_has_null = right.rows.value > right_profile.frequency.value;
-    let null_pair_selectivity = if null_safe && left_has_null && right_has_null {
+    let null_pairs = if edge.null_safe {
         (1.0 - left_non_null) * (1.0 - right_non_null)
     } else {
         0.0
     };
-    let null_match_probability = if null_safe && right_has_null {
-        1.0 - left_non_null
-    } else {
-        0.0
-    };
     if intersection.domains_disjoint {
-        let nulls_can_match = null_pair_selectivity > 0.0;
         return EqualityEdgeEstimate {
-            pair_selectivity: null_pair_selectivity,
-            left_match_probability: null_match_probability,
-            left_coverage: Some(LeftEqualityCoverage {
-                column: left_column,
-                input_distinct: left_distinct,
-                input_non_null_fraction: left_non_null,
-                intersection_distinct: 0.0,
-                non_null_match_probability: 0.0,
-                null_match_probability,
-                ordinary_non_null: !null_safe,
-            }),
-            domains_disjoint: !nulls_can_match,
+            pair_selectivity: null_pairs,
+            intersection_distinct: Some(0.0),
+            domains_disjoint: null_pairs == 0.0,
         };
     }
 
-    if !null_safe
+    if !edge.null_safe
         && right.rows.value > 0.0
         && let (Some(catalog), Some(left_base), Some(right_base)) = (catalog, left_base, right_base)
         && single_column_foreign_key(left_base, right_base, catalog)
         && profile_has_complete_base_population(right, right_base, catalog)
     {
-        // Every surviving non-null FK row has exactly one partner in the complete referenced key.
         return EqualityEdgeEstimate {
-            pair_selectivity: if right.rows.value <= 0.0 {
-                0.0
-            } else {
-                left_non_null / right.rows.value
-            },
-            left_match_probability: left_non_null,
-            left_coverage: Some(LeftEqualityCoverage {
-                column: left_column,
-                input_distinct: left_distinct,
-                input_non_null_fraction: left_non_null,
-                intersection_distinct: left_distinct,
-                non_null_match_probability: left_non_null,
-                null_match_probability: 0.0,
-                ordinary_non_null: true,
-            }),
+            pair_selectivity: left_non_null / right.rows.value,
+            intersection_distinct: Some(left_distinct),
             domains_disjoint: false,
         };
     }
 
-    let equal_non_null = if left_distinct <= 0.0 || right_distinct <= 0.0 {
+    let non_null_pairs = if left_distinct <= 0.0 || right_distinct <= 0.0 {
         0.0
     } else {
         left_non_null * right_non_null * intersection.distinct / (left_distinct * right_distinct)
     };
-    let sketch_selectivity = (!null_safe)
-        .then(|| sketch_join_estimate(first, second, left, right))
-        .flatten();
-    let uniform_pair_selectivity = if null_safe {
-        equal_non_null + null_pair_selectivity
+    let pair_selectivity = if edge.null_safe {
+        non_null_pairs + null_pairs
     } else {
-        equal_non_null
+        sketch_join_estimate(edge.left, edge.right, left, right).unwrap_or(non_null_pairs)
     };
-    let pair_selectivity = sketch_selectivity.unwrap_or(uniform_pair_selectivity);
-    // Leis/Postgres inclusion: P(match) = nn_L * min(dL,dR) / dL when domains nest.
-    let inclusion_non_null_match_probability = if left_distinct <= 0.0 {
-        0.0
-    } else {
-        left_non_null * intersection.distinct / left_distinct
-    };
-    let sketch_match = (!null_safe)
-        .then(|| {
-            sketch_left_match_probability(
-                first,
-                second,
-                left,
-                right,
-                intersection.distinct,
-                left_distinct,
-            )
-        })
-        .flatten();
-    // Leaf-filter sampling policy: independent samples estimate filters, not join key presence.
-    // SpaceSaving may raise inclusion, but sparse sample overlap must never lower it.
-    let non_null_match_probability = sketch_match
-        .map(|sketch| sketch.max(inclusion_non_null_match_probability))
-        .unwrap_or(inclusion_non_null_match_probability);
     EqualityEdgeEstimate {
         pair_selectivity: pair_selectivity.clamp(0.0, 1.0),
-        left_match_probability: (non_null_match_probability + null_match_probability)
-            .clamp(0.0, 1.0),
-        left_coverage: Some(LeftEqualityCoverage {
-            column: left_column,
-            input_distinct: left_distinct,
-            input_non_null_fraction: left_non_null,
-            intersection_distinct: intersection.distinct,
-            non_null_match_probability,
-            null_match_probability,
-            ordinary_non_null: !null_safe,
-        }),
+        intersection_distinct: Some(intersection.distinct),
         domains_disjoint: false,
     }
 }
 
-/// Experimental existence probability; not used by default CE (independent samples are biased).
-#[allow(dead_code)]
-fn sample_key_match_probability(
-    left_base: Option<&BaseColumn>,
-    right_base: Option<&BaseColumn>,
+/// PostgreSQL 17 `eqjoinsel_semi`, adapted to profile NDVs and current-population MCVs.
+///
+/// The RHS NDV alone is additionally capped by input rows. Known matched left MCV mass is
+/// counted once; the uncertain non-null remainder uses the remaining NDV ratio, or 0.5 when
+/// an NDV is default. As in PostgreSQL's caller, cap the result by RHS rows * inner selectivity.
+/// NULL-safe equality extends the ordinary-equality estimate with eligible left NULL rows.
+/// Source: postgres/REL_17_STABLE/src/backend/utils/adt/selfuncs.c.
+fn equality_semi_selectivity(
+    edge: &EqualityEdge,
+    left: &CardinalityProfile,
+    right: &CardinalityProfile,
+    pair_selectivity: f64,
     catalog: Option<&dyn Catalog>,
-) -> Option<f64> {
-    let (catalog, left_base, right_base) = match (catalog, left_base, right_base) {
-        (Some(catalog), Some(left_base), Some(right_base)) => (catalog, left_base, right_base),
-        _ => return None,
+) -> f64 {
+    if left.rows.value <= 0.0 || right.rows.value <= 0.0 {
+        return 0.0;
+    }
+    let Some((_, _, left_profile, right_profile)) =
+        oriented_join_columns(edge.left, edge.right, left, right)
+    else {
+        return 0.0;
     };
-    let left_sample = catalog.table_samples(&left_base.table).ok().flatten()?;
-    let right_sample = catalog.table_samples(&right_base.table).ok().flatten()?;
-    let left_relation = optd_sampling::SampleRelation::from_table_sample(&left_sample, &[]).ok()?;
-    let right_relation =
-        optd_sampling::SampleRelation::from_table_sample(&right_sample, &[]).ok()?;
-    optd_sampling::key_presence_match_fraction(
-        &left_relation,
-        &right_relation,
-        std::slice::from_ref(&left_base.name),
-        std::slice::from_ref(&right_base.name),
-    )
-    .ok()
-    .map(|value| value.clamp(0.0, 1.0))
+    let left_non_null = non_null_fraction(left_profile.frequency.value, left.rows.value);
+    let right_non_null = non_null_fraction(right_profile.frequency.value, right.rows.value);
+    let null_selectivity = if edge.null_safe && right_non_null < 1.0 {
+        1.0 - left_non_null
+    } else {
+        0.0
+    };
+    let inner_cap = (right.rows.value * pair_selectivity).clamp(0.0, 1.0);
+    if left_non_null == 0.0 || right_non_null == 0.0 {
+        return null_selectivity.min(inner_cap);
+    }
+
+    let left_base = base_column(left_profile);
+    let right_base = base_column(right_profile);
+    if !edge.null_safe
+        && let (Some(catalog), Some(left_base), Some(right_base)) = (catalog, left_base, right_base)
+        && single_column_foreign_key(left_base, right_base, catalog)
+        && profile_has_complete_base_population(right, right_base, catalog)
+    {
+        return left_non_null.min(inner_cap);
+    }
+
+    let mut left_ndv = effective_join_distinct(left, left_profile, left_base, catalog);
+    let mut right_ndv = effective_join_distinct(right, right_profile, right_base, catalog);
+    let left_default = left_profile.distinct.source == EstimateSource::Default;
+    let mut right_default = right_profile.distinct.source == EstimateSource::Default;
+    if right_ndv >= right.rows.value {
+        right_ndv = right.rows.value;
+        right_default = false;
+    }
+    let mut matched_mass = 0.0;
+    if let (Some(left_mcv), Some(right_mcv)) = (
+        semi_join_mcv(left, left_profile),
+        semi_join_mcv(right, right_profile),
+    ) {
+        // Catalog MCV order is unspecified; PostgreSQL considers only the most frequent
+        // capped-RHS-NDV entries when the immediate input is smaller than the stored list.
+        let mut right_entries = right_mcv.entries().iter().collect::<Vec<_>>();
+        right_entries.sort_by_key(|entry| std::cmp::Reverse(entry.frequency));
+        right_entries.truncate(right_ndv.max(0.0) as usize);
+        let mut matched_values = 0.0;
+        for entry in left_mcv.entries() {
+            if entry.frequency > 0
+                && right_entries
+                    .iter()
+                    .any(|other| other.frequency > 0 && other.value == entry.value)
+            {
+                matched_mass += entry.frequency as f64 / left.rows.value;
+                matched_values += 1.0;
+            }
+        }
+        left_ndv -= matched_values;
+        right_ndv -= matched_values;
+    }
+    matched_mass = matched_mass.clamp(0.0, left_non_null);
+    let uncertain_fraction = if left_default || right_default {
+        0.5
+    } else if left_ndv <= right_ndv || right_ndv < 0.0 {
+        1.0
+    } else {
+        (right_ndv / left_ndv).clamp(0.0, 1.0)
+    };
+    let selectivity =
+        matched_mass + uncertain_fraction * (left_non_null - matched_mass) + null_selectivity;
+    selectivity.clamp(0.0, 1.0).min(inner_cap)
+}
+
+/// Do not interpret a base distribution retained as a post-join proxy as current MCV mass.
+fn semi_join_mcv<'a>(
+    relation: &CardinalityProfile,
+    profile: &'a ColumnProfile,
+) -> Option<&'a crate::MostCommonValues> {
+    let population_is_current = profile.sketches.as_ref().map_or(
+        matches!(
+            relation.rows.source,
+            EstimateSource::Catalog | EstimateSource::Exact
+        ),
+        |sketches| sketches.population_rows as f64 == relation.rows.value,
+    );
+    population_is_current
+        .then(|| profile.distribution.as_ref()?.most_common_values.as_ref())
+        .flatten()
 }
 
 fn oriented_join_columns<'a>(
@@ -4065,62 +3900,6 @@ fn sketch_join_estimate(
     let selectivity = ((heavy_join_rows + residual_join_rows) / population_product).clamp(0.0, 1.0);
 
     Some(selectivity)
-}
-
-/// Estimates directional left-side key coverage from common SpaceSaving entries plus uniform
-/// residual-domain overlap. Unlike pair selectivity, right-side duplicate frequency does not
-/// increase this probability.
-fn sketch_left_match_probability(
-    first: Column,
-    second: Column,
-    left: &CardinalityProfile,
-    right: &CardinalityProfile,
-    intersection_distinct: f64,
-    left_distinct: f64,
-) -> Option<f64> {
-    let (_, _, left_profile, right_profile) = oriented_join_columns(first, second, left, right)?;
-    let left_sketches = left_profile.sketches.as_ref()?;
-    let right_sketches = right_profile.sketches.as_ref()?;
-    let left_frequent = left_sketches.frequent_values.as_ref()?;
-    let right_frequent = right_sketches.frequent_values.as_ref()?;
-    if left_sketches.population_rows == 0 || right_sketches.population_rows == 0 {
-        return None;
-    }
-
-    let mut known_matched_left_rows = 0.0;
-    let mut common_values = 0.0;
-    for left_item in left_frequent.entries() {
-        let left_frequency = left_item.lower_frequency() as f64;
-        if left_frequency > 0.0
-            && right_frequent
-                .estimate(&left_item.value)
-                .is_some_and(|item| item.lower_frequency() > 0)
-        {
-            known_matched_left_rows += left_frequency;
-            common_values += 1.0;
-        }
-    }
-    let left_non_null_rows = left_sketches.population_rows as f64
-        * if left.rows.value <= 0.0 {
-            0.0
-        } else {
-            (left_profile.frequency.value / left.rows.value).clamp(0.0, 1.0)
-        };
-    let residual_left_rows = (left_non_null_rows - known_matched_left_rows).max(0.0);
-    let residual_left_distinct = (left_distinct - common_values).max(0.0);
-    let residual_intersection = (intersection_distinct - common_values)
-        .max(0.0)
-        .min(residual_left_distinct);
-    let residual_matched_left_rows = if residual_left_distinct <= 0.0 {
-        0.0
-    } else {
-        residual_left_rows * residual_intersection / residual_left_distinct
-    };
-    Some(
-        ((known_matched_left_rows + residual_matched_left_rows)
-            / left_sketches.population_rows as f64)
-            .clamp(0.0, 1.0),
-    )
 }
 
 pub(crate) fn connecting_edge_indices(
@@ -4766,7 +4545,6 @@ struct CompositeJoinEstimate {
     covered_edges: BTreeSet<(Column, Column)>,
     uses_unique_constraint: bool,
     pair_selectivity: f64,
-    left_match_probability: f64,
 }
 
 fn non_null_fraction(non_null_rows: f64, population_rows: f64) -> f64 {
@@ -4954,11 +4732,6 @@ fn composite_join_estimate(
                     uses_unique_constraint: joint_unique_distinct.is_some()
                         || other_unique_distinct.is_some(),
                     pair_selectivity: pair_selectivity.clamp(0.0, 1.0),
-                    left_match_probability: if left_distinct <= 0.0 {
-                        0.0
-                    } else {
-                        (left_non_null * intersection / left_distinct).clamp(0.0, 1.0)
-                    },
                 })
             })
         })
@@ -9277,21 +9050,284 @@ mod tests {
         assert_eq!(selectivity.value, 0.001);
     }
 
-    #[test]
-    fn residual_match_probability_models_at_least_one_surviving_candidate() {
-        // Half of left rows have equality candidates. Each matched row has 200 candidates, and
-        // each candidate independently survives the residual predicate with probability 0.1.
-        // Linear scaling would incorrectly estimate 0.05; nearly every matched row survives.
-        let probability = residual_match_probability(0.5, 0.1, 1_000.0, 0.1);
-        assert!(probability > 0.49);
-        assert!(probability <= 0.5);
-
-        assert_eq!(residual_match_probability(0.5, 0.1, 1_000.0, 0.0), 0.0);
-        assert_eq!(residual_match_probability(0.5, 0.1, 1_000.0, 1.0), 0.5);
+    fn postgres_semi_test_profile(column: Column, values: &[i64]) -> CardinalityProfile {
+        let mut counts = BTreeMap::<i64, usize>::new();
+        let mut sketches = ColumnSketches::new(values.len() as u64)
+            .space_saving(128)
+            .unwrap();
+        for &value in values {
+            *counts.entry(value).or_default() += 1;
+            sketches.observe(&ScalarValue::Int64(value));
+        }
+        let mut profile = test_column_profile(values.len() as f64, counts.len() as f64);
+        profile.sketches = Some(Arc::new(sketches));
+        profile.distribution = Some(Arc::new(crate::ColumnDistributionStatistics {
+            null_count: None,
+            most_common_values: Some(
+                crate::MostCommonValues::try_new(
+                    counts
+                        .into_iter()
+                        .map(|(value, frequency)| crate::MostCommonValue {
+                            value: ScalarValue::Int64(value),
+                            frequency,
+                        })
+                        .collect(),
+                    crate::StatisticsCompleteness::Complete,
+                    crate::StatisticsProvenance::FullScan,
+                )
+                .unwrap(),
+            ),
+            histogram: None,
+        }));
+        CardinalityProfile::new(
+            Estimate::exact(values.len() as f64),
+            [(column, profile)].into_iter().collect(),
+        )
     }
 
     #[test]
-    fn cardinality_estimation_uses_match_probability_for_semi_and_anti() {
+    fn postgres_semi_selectivity_respects_known_mcv_mass() {
+        let mut ctx = QueryContext::new();
+        let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
+        let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
+        let predicate = equality_expr(&mut ctx, left_key, right_key);
+        let mut values = vec![1];
+        values.extend(std::iter::repeat_n(2, 901));
+        values.extend(3..=100);
+        let left = postgres_semi_test_profile(left_key, &values);
+        let right = postgres_semi_test_profile(right_key, &[1]);
+        let inner = join_profile_from_predicate(&left, &right, JoinType::Inner, predicate, &ctx);
+        let semi = join_profile_from_predicate(&left, &right, JoinType::LeftSemi, predicate, &ctx);
+        let anti = join_profile_from_predicate(&left, &right, JoinType::LeftAnti, predicate, &ctx);
+        assert_eq!(inner.rows.value, 1.0);
+        assert_eq!(semi.rows.value, 1.0);
+        assert_eq!(anti.rows.value, 999.0);
+        assert!(semi.rows.value <= inner.rows.value);
+    }
+
+    #[test]
+    fn postgres_semi_selectivity_multiplies_residual_without_fanout() {
+        let mut ctx = QueryContext::new();
+        let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
+        let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
+        let equality = equality_expr(&mut ctx, left_key, right_key);
+        let left_ref = ExprData::ColumnRef(left_key).add(&mut ctx);
+        let literal = ExprData::Literal(ScalarValue::Int64(500)).add(&mut ctx);
+        let residual = ExprData::Binary {
+            op: BinaryOp::Gt,
+            left: left_ref,
+            right: literal,
+        }
+        .add(&mut ctx);
+        let left = CardinalityProfile::new(
+            Estimate::exact(1_000.0),
+            [(left_key, test_column_profile(1_000.0, 1_000.0))]
+                .into_iter()
+                .collect(),
+        );
+        let right = CardinalityProfile::new(
+            Estimate::exact(100_000.0),
+            [(right_key, test_column_profile(100_000.0, 1_000.0))]
+                .into_iter()
+                .collect(),
+        );
+        let semi = join_profile_from_conjuncts(
+            &left,
+            &right,
+            JoinType::LeftSemi,
+            &[equality, residual],
+            &ctx,
+        );
+        let anti = join_profile_from_conjuncts(
+            &left,
+            &right,
+            JoinType::LeftAnti,
+            &[equality, residual],
+            &ctx,
+        );
+        let expected = 1_000.0 * CardinalityEstimationConfig::default().range_fallback_selectivity;
+        assert!((semi.rows.value - expected).abs() < 1e-9);
+        assert!((semi.rows.value + anti.rows.value - 1_000.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn postgres_semi_selectivity_defaults_to_half_for_unknown_ndvs() {
+        let mut ctx = QueryContext::new();
+        let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
+        let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
+        let predicate = equality_expr(&mut ctx, left_key, right_key);
+        let profile = |column| {
+            let mut key = test_column_profile(1_000.0, 100.0);
+            key.distinct = Estimate::default(100.0);
+            CardinalityProfile::new(
+                Estimate::exact(1_000.0),
+                [(column, key)].into_iter().collect(),
+            )
+        };
+        let semi = join_profile_from_predicate(
+            &profile(left_key),
+            &profile(right_key),
+            JoinType::LeftSemi,
+            predicate,
+            &ctx,
+        );
+        assert_eq!(semi.rows.value, 500.0);
+    }
+
+    #[test]
+    fn postgres_semi_selectivity_uses_partial_mcv_mass_and_uncertain_remainder() {
+        let mut ctx = QueryContext::new();
+        let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
+        let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
+        let predicate = equality_expr(&mut ctx, left_key, right_key);
+        let reversed = equality_expr(&mut ctx, right_key, left_key);
+        let profile = |column, rows, ndv, entries: &[(i64, usize)]| {
+            let mut key = test_column_profile(rows, ndv);
+            key.distribution = Some(Arc::new(crate::ColumnDistributionStatistics {
+                null_count: None,
+                most_common_values: Some(
+                    crate::MostCommonValues::try_new(
+                        entries
+                            .iter()
+                            .map(|&(value, frequency)| crate::MostCommonValue {
+                                value: ScalarValue::Int64(value),
+                                frequency,
+                            })
+                            .collect(),
+                        crate::StatisticsCompleteness::Partial,
+                        crate::StatisticsProvenance::Catalog,
+                    )
+                    .unwrap(),
+                ),
+                histogram: None,
+            }));
+            CardinalityProfile::new(
+                Estimate::catalog(rows),
+                [(column, key)].into_iter().collect(),
+            )
+        };
+        let mut left = profile(left_key, 1_000.0, 100.0, &[(1, 200), (2, 300)]);
+        let mut right = profile(right_key, 10_000.0, 10.0, &[(1, 1_000), (3, 2_000)]);
+        left.columns.get_mut(&left_key).unwrap().frequency = Estimate::exact(800.0);
+        for on in [predicate, reversed] {
+            let semi = join_profile_from_predicate(&left, &right, JoinType::LeftSemi, on, &ctx);
+            // Known mass 0.2; uncertain non-null mass 0.6; remaining NDVs are 99 and 9.
+            assert!((semi.rows.value - 1_000.0 * (0.2 + 0.6 * 9.0 / 99.0)).abs() < 1e-9);
+        }
+        left.columns.get_mut(&left_key).unwrap().distinct = Estimate::default(100.0);
+        let semi = join_profile_from_predicate(&left, &right, JoinType::LeftSemi, predicate, &ctx);
+        assert!((semi.rows.value - 500.0).abs() < 1e-9);
+
+        // Without both lists, PostgreSQL uses the NDV fallback, not one-sided MCV mass.
+        left.columns.get_mut(&left_key).unwrap().distinct = Estimate::exact(100.0);
+        right.columns.get_mut(&right_key).unwrap().distribution = None;
+        let semi = join_profile_from_predicate(&left, &right, JoinType::LeftSemi, predicate, &ctx);
+        assert!((semi.rows.value - 80.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn postgres_semi_selectivity_clamps_only_rhs_ndv_and_caps_by_inner_rows() {
+        let mut ctx = QueryContext::new();
+        let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
+        let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
+        let predicate = equality_expr(&mut ctx, left_key, right_key);
+        let mut left = CardinalityProfile::new(
+            Estimate::exact(10.0),
+            [(left_key, test_column_profile(10.0, 100.0))]
+                .into_iter()
+                .collect(),
+        );
+        let mut right = CardinalityProfile::new(
+            Estimate::exact(10.0),
+            [(right_key, test_column_profile(10.0, 100.0))]
+                .into_iter()
+                .collect(),
+        );
+        right.columns.get_mut(&right_key).unwrap().distinct = Estimate::default(100.0);
+        let semi = join_profile_from_predicate(&left, &right, JoinType::LeftSemi, predicate, &ctx);
+        // RHS cap makes its default NDV usable; LHS is not capped again in eqjoinsel_semi.
+        assert_eq!(semi.rows.value, 1.0);
+
+        left.rows = Estimate::exact(1_000.0);
+        left.columns.get_mut(&left_key).unwrap().frequency = Estimate::exact(1_000.0);
+        left.columns.get_mut(&left_key).unwrap().distinct = Estimate::default(1_000.0);
+        right.rows = Estimate::exact(1.0);
+        right.columns.get_mut(&right_key).unwrap().frequency = Estimate::exact(1.0);
+        right.columns.get_mut(&right_key).unwrap().distinct = Estimate::exact(1.0);
+        let semi = join_profile_from_predicate(&left, &right, JoinType::LeftSemi, predicate, &ctx);
+        let inner = join_profile_from_predicate(&left, &right, JoinType::Inner, predicate, &ctx);
+        // The 0.5 default must not exceed the one expected inner pair.
+        assert_eq!(semi.rows.value, 1.0);
+        assert_eq!(inner.rows.value, 1.0);
+    }
+
+    #[test]
+    fn postgres_semi_selectivity_handles_empty_and_null_only_inputs() {
+        let mut ctx = QueryContext::new();
+        let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
+        let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
+        let ordinary = equality_expr(&mut ctx, left_key, right_key);
+        let left_ref = ExprData::ColumnRef(left_key).add(&mut ctx);
+        let right_ref = ExprData::ColumnRef(right_key).add(&mut ctx);
+        let null_safe = ExprData::Binary {
+            op: BinaryOp::IsNotDistinctFrom,
+            left: left_ref,
+            right: right_ref,
+        }
+        .add(&mut ctx);
+        let mut left_column = test_column_profile(100.0, 10.0);
+        left_column.frequency = Estimate::exact(50.0);
+        let left = CardinalityProfile::new(
+            Estimate::exact(100.0),
+            [(left_key, left_column)].into_iter().collect(),
+        );
+        let mut right_column = test_column_profile(10.0, 0.0);
+        right_column.frequency = Estimate::exact(0.0);
+        let mut right = CardinalityProfile::new(
+            Estimate::exact(10.0),
+            [(right_key, right_column)].into_iter().collect(),
+        );
+        for (on, expected) in [(ordinary, 0.0), (null_safe, 50.0)] {
+            let semi = join_profile_from_predicate(&left, &right, JoinType::LeftSemi, on, &ctx);
+            let anti = join_profile_from_predicate(&left, &right, JoinType::LeftAnti, on, &ctx);
+            assert_eq!(semi.rows.value, expected);
+            assert_eq!(anti.rows.value, 100.0 - expected);
+        }
+        right.rows = Estimate::exact(0.0);
+        for on in [ordinary, null_safe] {
+            let semi = join_profile_from_predicate(&left, &right, JoinType::LeftSemi, on, &ctx);
+            let anti = join_profile_from_predicate(&left, &right, JoinType::LeftAnti, on, &ctx);
+            assert_eq!(semi.rows.value, 0.0);
+            assert_eq!(anti.rows.value, 100.0);
+        }
+        let empty = left.cap_by_rows(Estimate::exact(0.0));
+        right.rows = Estimate::exact(10.0);
+        for join_type in [JoinType::LeftSemi, JoinType::LeftAnti] {
+            let result = join_profile_from_predicate(&empty, &right, join_type, null_safe, &ctx);
+            assert_eq!(result.rows.value, 0.0);
+        }
+    }
+
+    #[test]
+    fn postgres_semi_selectivity_does_not_use_post_join_mcv_proxies() {
+        let mut ctx = QueryContext::new();
+        let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
+        let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
+        let predicate = equality_expr(&mut ctx, left_key, right_key);
+        let mut values = vec![1];
+        values.extend(std::iter::repeat_n(2, 901));
+        values.extend(3..=100);
+        let mut left = postgres_semi_test_profile(left_key, &values);
+        let right = postgres_semi_test_profile(right_key, &[1]);
+        left.rows.source = EstimateSource::Derived;
+        left.columns.get_mut(&left_key).unwrap().sketches = None;
+        assert!(semi_join_mcv(&left, &left.columns[&left_key]).is_none());
+        let semi = join_profile_from_predicate(&left, &right, JoinType::LeftSemi, predicate, &ctx);
+        assert_eq!(semi.rows.value, 10.0);
+    }
+
+    #[test]
+    fn cardinality_estimation_uses_postgres_selectivity_for_semi_and_anti() {
         let mut ctx = QueryContext::new();
         let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
         let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
@@ -9465,14 +9501,14 @@ mod tests {
             None,
             &ctx,
         );
-        assert!((overlap.left_match_probability - 0.5).abs() < f64::EPSILON);
+        assert_eq!(overlap.intersection_distinct, Some(50.0));
         assert!((overlap.pair_selectivity - 0.005).abs() < f64::EPSILON);
 
         let disjoint =
             equality_edge_estimate(&equality_edge(false, 100.0), &left, &disjoint, None, &ctx);
         assert!(disjoint.domains_disjoint);
         assert_eq!(disjoint.pair_selectivity, 0.0);
-        assert_eq!(disjoint.left_match_probability, 0.0);
+        assert_eq!(disjoint.intersection_distinct, Some(0.0));
 
         let nullable_left = profile_from_values(left_column, vec![None, Some(1)]);
         let nullable_right = profile_from_values(right_column, vec![None, Some(100)]);
@@ -9485,7 +9521,7 @@ mod tests {
         );
         assert!(!null_safe.domains_disjoint);
         assert_eq!(null_safe.pair_selectivity, 0.25);
-        assert_eq!(null_safe.left_match_probability, 0.5);
+        assert_eq!(null_safe.intersection_distinct, Some(0.0));
     }
 
     #[test]
@@ -9742,7 +9778,7 @@ mod tests {
     }
 
     #[test]
-    fn semi_and_anti_profiles_propagate_equality_key_domains() {
+    fn semi_and_anti_profiles_use_row_thinning_without_inferred_key_domains() {
         let mut ctx = QueryContext::new();
         let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
         let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
@@ -9764,13 +9800,19 @@ mod tests {
             join_profile_from_conjuncts(&left, &right, JoinType::LeftSemi, &[predicate], &ctx);
         assert_eq!(semi.rows.value, 100.0);
         assert_eq!(semi.columns[&left_key].frequency.value, 100.0);
-        assert_eq!(semi.columns[&left_key].distinct.value, 10.0);
+        assert_eq!(
+            semi.columns[&left_key].distinct,
+            surviving_distinct_after_row_filter(&left.columns[&left_key], 0.1, 100.0),
+        );
 
         let anti =
             join_profile_from_conjuncts(&left, &right, JoinType::LeftAnti, &[predicate], &ctx);
         assert_eq!(anti.rows.value, 900.0);
         assert_eq!(anti.columns[&left_key].frequency.value, 900.0);
-        assert_eq!(anti.columns[&left_key].distinct.value, 90.0);
+        assert_eq!(
+            anti.columns[&left_key].distinct,
+            surviving_distinct_after_row_filter(&left.columns[&left_key], 0.9, 900.0),
+        );
 
         let mut nullable_left_key = test_column_profile(100.0, 10.0);
         nullable_left_key.frequency = Estimate::exact(50.0);
@@ -9792,8 +9834,12 @@ mod tests {
             &ctx,
         );
         assert_eq!(nullable_anti.rows.value, 50.0);
-        assert_eq!(nullable_anti.columns[&left_key].frequency.value, 0.0);
-        assert_eq!(nullable_anti.columns[&left_key].distinct.value, 0.0);
+        // A selectivity alone does not prove the unmatched key domain or non-null mass.
+        assert_eq!(nullable_anti.columns[&left_key].frequency.value, 25.0);
+        assert_eq!(
+            nullable_anti.columns[&left_key].distinct,
+            surviving_distinct_after_row_filter(&nullable_left.columns[&left_key], 0.5, 25.0),
+        );
     }
 
     #[test]
@@ -10050,7 +10096,10 @@ mod tests {
             right_ndv: Estimate::exact(100.0),
         };
         let estimate = equality_edge_estimate(&edge, &left, &right, None, &ctx);
-        assert_eq!(estimate.left_match_probability, 1.0);
+        assert_eq!(
+            equality_semi_selectivity(&edge, &left, &right, estimate.pair_selectivity, None),
+            1.0,
+        );
     }
 
     #[test]

@@ -128,30 +128,40 @@ under a join-containment assumption the estimator can use one NDV for the whole 
 multiplying transitively redundant selectivities. This avoids over-penalizing chains such as
 `A.x = B.x` and `B.x = C.x`.
 
-Inner-join pair selectivity and semi/anti existence probability are separate estimates. For a left
-semi/anti equality, directional coverage starts from Leis/Postgres inclusion:
+Semi/anti joins use PostgreSQL 17's `eqjoinsel_semi` policy rather than a separate custom
+match-probability model. For reliable NDVs without paired MCV lists, equality selectivity is
+`left_non_null_fraction * min(1, right_ndv / left_ndv)`; an unknown/default NDV uses half the
+non-null left population. Only the right NDV is additionally capped by the immediate right input's
+row count, and that cap makes its estimate non-default. With current-population MCV lists on both
+sides, known matched left MCV frequencies are counted once and only the uncertain remainder uses
+the NDV ratio (after subtracting matched distinct values). Right MCVs are frequency-ranked and
+limited to the capped right NDV. Base-population distributions retained as proxies after joins
+are not treated as current-population MCVs.
 
-```text
-left_non_null_fraction * intersection_ndv / left_ndv
-```
+As in PostgreSQL's `eqjoinsel`, each equality's semi selectivity is capped by
+`right_rows * inner_pair_selectivity`. Conjunct selectivities, including residual predicates, are
+multiplied directly; there is no fanout exponent, SpaceSaving coverage override, sampled key-presence
+estimate, or inferred anti-join domain subtraction. Semi rows are `left_rows * selectivity`; anti
+rows are `left_rows * (1 - selectivity)`. Empty inputs and ordinary equality against an all-NULL
+right key produce no semi rows. Null-safe equality additionally admits the left NULL fraction when
+the right key has NULLs, subject to the same inner-pair cap. Population-safe FK assertions retain
+their stronger ordinary-equality estimate. Column profiles use ordinary row-thinning/capping;
+only proven ordinary-equality keys become non-null on semi output.
 
-with NDVs clamped to non-null frequency and row count. Leaf samples estimate filter selectivity,
-not join key-presence probabilities; joins use NDV coverage instead. Sparse samples systematically
-miss real matches. SpaceSaving sketch match can raise inclusion. See the
-[implementation plan](superpowers/plans/2026-11-13-ce-leaf-sampling-hll-intersection-scbc.md). When an equality match
-has estimated conditional fanout `f` and residual predicates have pair selectivity `r`, semi/anti
-survival uses `1 - (1 - r)^f`, rather than incorrectly multiplying the match probability by `r`.
-Compatible ordered ranges detect disjoint domains and estimate numeric/date overlap under
+This follows [PostgreSQL 17 `selfuncs.c`](https://github.com/postgres/postgres/blob/REL_17_STABLE/src/backend/utils/adt/selfuncs.c)
+(`eqjoinsel_semi` and its caller), adapted to our profile statistics, NULL-safe equality, and existing
+inner-pair estimator. Clause independence and containment remain estimation assumptions, not proofs
+of composite-key overlap. The default-NDV flag is taken from the profile's `EstimateSource::Default`;
+derived profiles use their propagated NDV estimates. Leaf samples estimate filter selectivity only.
+
+For inner-pair estimation, compatible ordered ranges detect disjoint domains and estimate numeric/date overlap under
 uniformity. Before the range-fraction fallback, compatible live HLLs use **joint Poisson maximum
 likelihood** (Ertl) for domain intersection, never HLL inclusion–exclusion. Ertl rejects unidentified, failed, or low-Jaccard fits (`ERTL_MIN_JACCARD = 0.05`)
 and falls back to range/NDV containment. Disjoint ranges still take precedence. Compatibility
 requires equal precision, hash seed, and value-encoding version. Only surviving base-population
 sketches qualify; filtered/joined profiles do not invent replacement HLLs.
-SpaceSaving common values refine known matched left-row mass without letting duplicate
-right rows inflate coverage; uncertain counters cannot lower the uniform baseline. Semi output key
-profiles are capped by the intersection domain, and pure single-key anti joins propagate
-complementary unmatched frequency and NDV. Catalog unique/FK assertions provide stronger estimates
-only while the required base population is complete. Direct-column composite inner equalities may
+SpaceSaving common values refine inner-join pair counts, not semi/anti coverage. Catalog unique/FK
+assertions provide stronger estimates only while the required base population is complete. Direct-column composite inner equalities may
 consume one compatible joint NDV from either input, with normalized edge orientation and per-edge
 fallback only for uncovered equalities. Multi-column histograms, joint NDVs beyond schema-prefix
 HLLs remain future work.
@@ -196,14 +206,14 @@ minimum, maintaining `lower <= value <= upper`.
 - [x] Retain opaque derived definitions instead of adding expression-specific lineage variants.
 - [x] Derive profiles for safe casts, bounded integer affine transforms, and year extraction.
 - [x] Add query-local HLL and SpaceSaving storage with downstream filter/join consumers.
-- [x] Separate directional equality coverage from tuple-pair selectivity for semi/anti joins.
+- [x] Use PostgreSQL-style semi/anti equality selectivity separately from inner-join pair selectivity.
 - [x] Add ordered-range domain overlap and disjointness checks.
 - [x] Add occupancy-based filtered NDV and proportional literal-domain restriction.
 - [x] Consume population-safe single-column unique/FK catalog assertions.
 - [x] Collect query-local HLLs for leading logical-schema prefixes through length five.
 - [x] Consume population-safe joint NDV for grouping and direct composite inner equalities.
 - [x] Replace uniform range overlap with histograms/samples (leaf samples + MCV/hist; progressive sample ANDs).
-- [x] Use leaf-filter sampling with NDV-based joins: leaf samples for filters, no sample-presence override; clamp inclusion NDVs.
+- [x] Use leaf-filter sampling for filters only; semi/anti joins use PostgreSQL NDV/MCV selectivity and RHS row clamping.
 - [x] Prefer live HLL sketch NDV for aggregation grouping keys when sketches survive on the input.
 - [x] Estimate compatible live HLL domain intersections by Ertl joint MLE with quality gating.
 - [x] Use sketch-corrected bound-corrected NDV estimation (SCBC) for multi-column grouping without fully covering joint NDVs, when a population sample is available.

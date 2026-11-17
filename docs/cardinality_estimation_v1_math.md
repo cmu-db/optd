@@ -37,10 +37,15 @@ building intermediate DP states.
   selectivity after the equality class is already connected.
 - Multiple equalities connecting the same classes should pick the strongest
   containment domain, not multiply all predicates.
-- Semi/anti joins should use match probability, not inner-join output rows.
-- Use leaf samples for filter selectivity and NDV coverage for joins, not independent-sample
-  join key presence.
-  Clamp inclusion NDVs to represented population (Postgres / Leis). Our compatible live-HLL
+- Semi/anti joins use PostgreSQL 17 `eqjoinsel_semi`: count matched left MCV mass, apply
+  `min(1, right_ndv / left_ndv)` to the uncertain non-null remainder, and use 0.5 when an NDV
+  is default. Clamp only the right NDV to right rows, then cap each equality's semi selectivity
+  by `right_rows * inner_pair_selectivity`. Conjuncts multiply directly; remove the custom
+  residual-fanout exponent, SpaceSaving coverage floor, and anti-domain subtraction. This is a
+  containment/independence estimator, not a proof of composite-key coverage. See the current
+  [behavior and source reference](cardinality_estimation_v1.md#join-estimation).
+- Use leaf samples for filter selectivity, not independent-sample join key presence.
+  Our compatible live-HLL
   intersection estimator is Ertl joint Poisson MLE; reject low-Jaccard (<0.05), unidentified,
   incompatible, or failed fits and retain range/NDV fallback. Never use HLL inclusion–exclusion.
 - Aggregation grouping prefers live HLL NDV when sketches remain on the input profile.
@@ -73,7 +78,7 @@ For transient/redundant equalities:
 - [x] Add deterministic TPCH/JOB key-column NDV mocks.
 - [x] Use PK/FK containment for equality selectivity.
 - [x] Pick the largest NDV for transient/multiple equality edges.
-- [x] Fix semi/anti join row math to use match probability.
+- [x] Use PostgreSQL-style semi/anti selectivity and remove the custom match-probability model.
 - [x] Preserve outer-join lower bounds while keeping expected match estimates.
 - [x] Preserve only sound equivalence classes for left, right, and full outer joins.
 - [x] Keep point estimates and upper/lower row bounds mutually consistent after null extension.
