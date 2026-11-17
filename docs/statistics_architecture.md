@@ -137,8 +137,14 @@ certainty. Probabilistic HLL uncertainty remains out of scope.
 
 ## Join and outer-join facts
 
-Inner joins combine input facts and add equality facts from the join condition. Semi, anti, and mark
-joins retain facts from the preserved input. Outer joins do not claim that their `ON` equalities hold
+Inner joins combine input facts and add equality facts from the join condition. Semi joins retain
+left facts and transfer RHS-proven literal/range/non-null constraints through mandatory column
+equality: every emitted left row has a witness satisfying those constraints. Literal/range transfer
+requires matching column types; literal values additionally require the same type and finite numeric
+values. This imports neither estimated NDV domains nor RHS functional dependencies. OR, computed
+keys and ambiguous column ownership decline transfer. Anti and mark joins retain only preserved-side
+facts. Known literal equalities are constants in grouping's dependency closure, so they add no
+independent grouping domain. Outer joins do not claim that their `ON` equalities hold
 for null-extended rows: left joins retain only left constraints, right joins retain only right
 constraints, and full outer joins retain neither side's constraints.
 

@@ -21,7 +21,8 @@ pub(super) fn independent_grouping_keys(
         .filter_map(|key| value_for_key(*key))
         .collect::<BTreeSet<_>>();
     let mut retained = values.clone();
-    if !facts.functional_dependencies.is_empty() {
+    if !facts.functional_dependencies.is_empty() || !facts.constraints.literal_equalities.is_empty()
+    {
         for value in values {
             let mut others = retained.clone();
             others.remove(&value);
@@ -340,6 +341,98 @@ mod tests {
             .get::<crate::LogicalFactsAnalysis>(&ctx, partial)
             .unwrap();
         assert!(partial_facts.functional_dependencies.is_empty());
+    }
+
+    #[test]
+    fn semi_join_right_literal_constraint_is_not_charged_twice() {
+        use crate::{BinaryOp, Join, JoinType, ScalarValue, Selection};
+        let (mut ctx, catalog, left, [_, left_key]) = fixture(false);
+        let right_key = ColumnData::new("attr", DataType::Int64).add(&mut ctx);
+        let right = OperatorData::Scan(Scan {
+            table: TableRef::bare("t"),
+            columns: vec![right_key],
+        })
+        .add(&mut ctx);
+        let left_ref = ExprData::ColumnRef(left_key).add(&mut ctx);
+        let right_ref = ExprData::ColumnRef(right_key).add(&mut ctx);
+        let five = ExprData::Literal(ScalarValue::Int64(5)).add(&mut ctx);
+        let right_predicate = ExprData::Binary {
+            op: BinaryOp::Eq,
+            left: right_ref,
+            right: five,
+        }
+        .add(&mut ctx);
+        let right = OperatorData::Selection(Selection {
+            input: right,
+            predicate: right_predicate,
+        })
+        .add(&mut ctx);
+        let mut analyses = AnalysisContext::new(catalog);
+        for op in [BinaryOp::Eq, BinaryOp::IsNotDistinctFrom] {
+            for reversed in [false, true] {
+                let on = ExprData::Binary {
+                    op,
+                    left: if reversed { right_ref } else { left_ref },
+                    right: if reversed { left_ref } else { right_ref },
+                }
+                .add(&mut ctx);
+                let semi = OperatorData::Join(Join {
+                    join_type: JoinType::LeftSemi,
+                    on,
+                    outer: left,
+                    inner: right,
+                })
+                .add(&mut ctx);
+                let repeated = ExprData::Binary {
+                    op: BinaryOp::Eq,
+                    left: left_ref,
+                    right: five,
+                }
+                .add(&mut ctx);
+                let filtered = OperatorData::Selection(Selection {
+                    input: semi,
+                    predicate: repeated,
+                })
+                .add(&mut ctx);
+                let before = analyses.get::<CardinalityEstimationV1>(&ctx, semi).unwrap();
+                let after = analyses
+                    .get::<CardinalityEstimationV1>(&ctx, filtered)
+                    .unwrap();
+                assert!(before.rows.value > 0.0);
+                assert_eq!(after.rows.value, before.rows.value);
+                let grouped = group(&mut ctx, semi, &[left_key]);
+                let groups = analyses
+                    .get::<CardinalityEstimationV1>(&ctx, grouped)
+                    .unwrap();
+                assert_eq!(groups.rows.value, 1.0);
+                assert_eq!(groups.rows.upper, Some(1.0));
+                let marker = ColumnData::new("mark", DataType::Boolean).add(&mut ctx);
+                for join_type in [
+                    JoinType::LeftAnti,
+                    JoinType::LeftMark {
+                        marker,
+                        nullable: false,
+                    },
+                    JoinType::LeftOuter,
+                    JoinType::RightOuter,
+                    JoinType::FullOuter,
+                    JoinType::Single,
+                ] {
+                    let other = OperatorData::Join(crate::Join {
+                        join_type,
+                        on,
+                        outer: left,
+                        inner: right,
+                    })
+                    .add(&mut ctx);
+                    let facts = analyses
+                        .get::<crate::LogicalFactsAnalysis>(&ctx, other)
+                        .unwrap();
+                    let key = facts.canonical_value_for_column(left_key).unwrap();
+                    assert!(!facts.constraints.literal_equalities.contains_key(&key));
+                }
+            }
+        }
     }
 
     #[test]

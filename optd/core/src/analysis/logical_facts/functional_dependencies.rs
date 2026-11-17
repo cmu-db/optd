@@ -23,6 +23,7 @@ pub struct ValueFunctionalDependency {
 
 impl LogicalFacts {
     /// Returns values implied by `values`, using equality and functional dependencies.
+    /// Known literal equalities are included as constant values even without determinants.
     ///
     /// The result contains canonical value identities. This is a logical closure:
     /// neither point estimates nor observed uniqueness create dependencies.
@@ -44,6 +45,13 @@ impl LogicalFacts {
             })
             .collect::<Vec<_>>();
         let mut closure = canonicalize(values);
+        // A literal equality determines its value even when no input key is known.
+        closure.extend(
+            self.constraints
+                .literal_equalities
+                .keys()
+                .map(|value| self.constraints.canonical(value)),
+        );
         loop {
             let old_len = closure.len();
             for (determinants, dependents) in &dependencies {

@@ -108,6 +108,33 @@ provider's responsibility under the existing `UniqueKey` contract.
   without verifying the necessary key metadata actually reaches the estimator.
 - No new q-error or controlled query-runtime benchmark was run for this checkpoint.
 
+### Phase 2b checkpoint — exact semi-join predicate consequences implemented
+
+A positive semi join on same-typed column equality can transfer RHS-proven literal,
+range, and non-null constraints onto the matching preserved-side key. This is a
+logical consequence of a match, not an inferred NDV domain or a change to the
+PostgreSQL semi-selectivity formula. It must not apply to anti/mark/outer joins,
+OR predicates, ambiguous column ownership, or cross-type coercions without proof.
+Known literal values also belong to the dependency closure as constants, allowing
+grouping to recognize that such keys add no independent domain.
+
+The new before/after reproducer initially estimated 10 semi rows and then 1.53534
+rows after a redundant LHS equality. The regression now asserts the invariant that
+repeating the proven filter preserves the semi estimate, rather than hard-coding
+a selectivity model's point. Concurrent work changed PostgreSQL variable-NDV lookup;
+that work and its extracted `semi_anti_tests.rs` are separate from this checkpoint.
+Tests cover both equality orientations, null-safe equality, exact literals,
+conjunctive ranges, contradictions, OR/computed-key refusal, cross-type/non-finite
+literal refusal, and anti/mark/outer/single negative boundaries. Grouping the known
+constant key has an upper bound of one, not an unconditional exact one-row claim.
+
+Verification on the combined working tree: 301 core tests, 288 without default
+features, 22 release TPC-H result SLTs, 18 release feature SLTs, and workspace Clippy
+pass. Earlier runs caught the old hard-coded point assertion and two concurrent
+floating-point test assertions; the latest full rerun passes after those test
+expectations were corrected. Analysis modules pass rustfmt. No new q-error or
+controlled latency benchmark was run, and HAVING estimation remains unchanged.
+
 ### Remaining Phase 2 work
 
 1. Audit semi-join key coverage and equality-class NDVs before introducing new

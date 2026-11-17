@@ -13,6 +13,7 @@ use super::{
 };
 
 mod functional_dependencies;
+mod semijoin_constraints;
 pub use functional_dependencies::ValueFunctionalDependency;
 
 /// Stable identity of a base-table value within one query.
@@ -600,7 +601,10 @@ fn derive_logical_facts(
                     facts.apply_predicate(join.on, ctx);
                     facts
                 }
-                JoinType::LeftSemi | JoinType::LeftAnti => left.as_ref().clone(),
+                JoinType::LeftSemi => {
+                    semijoin_constraints::semi_join_facts(&left, &right, join.on, ctx)
+                }
+                JoinType::LeftAnti => left.as_ref().clone(),
                 JoinType::LeftMark { marker, .. } => {
                     let mut facts = left.as_ref().clone();
                     facts.lineage.insert(marker, ValueId::Derived(marker));
