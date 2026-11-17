@@ -2,7 +2,7 @@
 
 ## Goal
 
-Match Umbra/Cedar: catalog table samples estimate **leaf predicates** only;
+Catalog table samples estimate **leaf predicates** only;
 joins stay **Selinger + HLL/NDV** (existing V1). Then wire existing catalog
 `MostCommonValues` + residual `Histogram` from full-scan collection.
 

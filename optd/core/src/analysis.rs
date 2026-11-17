@@ -1913,6 +1913,11 @@ fn cardinality_profile(
         OperatorData::Aggregation(data) => {
             let input = CardinalityEstimationV1::get_shared(ctx, analyses, data.input)?;
             let input_facts = LogicalFactsAnalysis::get_shared(ctx, analyses, data.input)?;
+            let sample = if data.keys.len() >= 2 {
+                sample_cardinality::try_grouping_sample_relation(data.input, ctx, analyses)?
+            } else {
+                None
+            };
             Ok(Arc::new(aggregation_profile(
                 &input,
                 &input_facts,
@@ -1920,6 +1925,7 @@ fn cardinality_profile(
                 ctx,
                 &config,
                 Some(catalog.as_ref()),
+                sample.as_ref(),
             )))
         }
         OperatorData::CrossProduct(data) => {
@@ -2279,6 +2285,37 @@ fn grouping_key_distinct(profile: &ColumnProfile, input_rows: f64) -> Estimate {
     profile.distinct.clone()
 }
 
+/// SCBC is attempted only with a sample evaluated over this exact scan pipeline.
+fn grouping_scbc(
+    input: &CardinalityProfile,
+    keys: &[Expr],
+    ctx: &QueryContext,
+    sample: &optd_sampling::SampleRelation,
+) -> Option<Estimate> {
+    let mut names = Vec::new();
+    let mut ndvs = Vec::new();
+    for key in keys {
+        let ExprData::ColumnRef(column) = key.get(ctx) else {
+            return None;
+        };
+        let profile = input.columns.get(column)?;
+        // Only direct base values are supported by the sample walker, not computed aliases.
+        base_column(profile)?;
+        names.push(ctx.column(*column).name.clone());
+        let non_null = grouping_key_distinct(profile, input.rows.value).value;
+        // HLL excludes NULL, but GROUP BY includes it even when a rare NULL misses the sample.
+        let null_group = f64::from(profile.frequency.value < input.rows.value);
+        ndvs.push((non_null + null_group).min(input.rows.value));
+    }
+    let value = optd_sampling::estimate_grouping_scbc(sample, &names, &ndvs, input.rows.value)?;
+    Some(Estimate {
+        value,
+        lower: Some(0.0),
+        upper: input.rows.upper,
+        source: EstimateSource::Sketch,
+    })
+}
+
 fn aggregation_profile(
     input: &CardinalityProfile,
     input_facts: &LogicalFacts,
@@ -2286,6 +2323,7 @@ fn aggregation_profile(
     ctx: &QueryContext,
     config: &CardinalityEstimationConfig,
     catalog: Option<&dyn Catalog>,
+    sample: Option<&optd_sampling::SampleRelation>,
 ) -> CardinalityProfile {
     let group_rows = if data.keys.is_empty() {
         // SQL scalar aggregation emits exactly one row even for an empty input.
@@ -2350,7 +2388,21 @@ fn aggregation_profile(
             };
             acc.combine_distinct_domains(&distinct, EstimateSource::Derived)
         });
-        product.cap_by_estimate(&input.rows, EstimateSource::Derived)
+        let fully_covered =
+            selected_joint.is_some_and(|joint| grouping_values.is_subset(&joint.values));
+        let scbc = (!unique_grouping && !fully_covered)
+            .then(|| grouping_scbc(input, &data.keys, ctx, sample?))
+            .flatten()
+            .map(|mut estimate| {
+                // A partial joint constrains the full tuple from below, but must not force
+                // independence for uncovered keys when a population sample is available.
+                if let Some(joint) = selected_joint {
+                    estimate.value = estimate.value.max(joint.distinct.value);
+                }
+                estimate
+            });
+        scbc.unwrap_or(product)
+            .cap_by_estimate(&input.rows, EstimateSource::Derived)
     };
 
     let mut columns = BTreeMap::new();
@@ -2459,11 +2511,15 @@ fn apply_selection_profile(
 ) -> CardinalityProfile {
     // Charge only information newly introduced by each conjunct. This handles both predicates
     // repeated across stacked selections and redundant equalities inside one conjunction.
-    // Sample conjuncts progress a working sample so later conjuncts are conditional, not
-    // independent marginals against the full leaf sample.
+    // Require the complete predicate, including preceding selections, to be evaluable.
+    // Per-conjunct progression below only propagates column statistics; row evidence comes
+    // from evaluating the whole predicate, never from independent marginal selectivities.
     let input_upper = profile.rows.upper;
-    let mut used_sample = false;
-    let mut working_sample = leaf_sample.cloned();
+    let whole_sample = leaf_sample.and_then(|sample| {
+        sample_cardinality::sample_conjunct_selectivity_progressing(sample, predicate, ctx)
+            .map(|(_, output)| output)
+    });
+    let mut working_sample = whole_sample.as_ref().and(leaf_sample).cloned();
     for conjunct in conjuncts(predicate, ctx) {
         let before = facts.constraints.clone();
         facts.apply_predicate(conjunct, ctx);
@@ -2474,7 +2530,6 @@ fn apply_selection_profile(
         } else if let Some((sample_sel, next_sample)) = working_sample.as_ref().and_then(|sample| {
             sample_cardinality::sample_conjunct_selectivity_progressing(sample, conjunct, ctx)
         }) {
-            used_sample = true;
             working_sample = Some(next_sample);
             sample_sel
         } else {
@@ -2484,12 +2539,30 @@ fn apply_selection_profile(
         profile = scale_profile(profile, selectivity, value_restriction);
         tighten_filter_columns(&mut profile, conjunct, ctx);
     }
-    if used_sample {
-        // Preserve LpBound-style filter endpoints: lower stays 0, upper inherits input mass.
-        profile.rows.source = EstimateSource::Sample;
+    if facts.constraints.contradictory {
+        profile.rows = Estimate::exact(0.0);
+    } else if let Some(sample) = whole_sample {
+        // Past samples are reusable population evidence by design: observed matching rows
+        // establish a lower bound. An empty sample result alone is not an emptiness proof.
+        let matches = sample.num_rows() as f64;
+        // A historical census tightens model-relative endpoints, not logical provenance.
+        let upper = if sample.scale == 1.0 {
+            Some(matches)
+        } else {
+            input_upper
+        };
+        profile.rows = Estimate::sample(sample.estimated_rows(), Some(matches), upper);
+    } else {
+        // Heuristic selectivity is not a bound on the number of surviving input rows.
         profile.rows.lower = Some(0.0);
-        profile.rows.upper = input_upper.or(profile.rows.upper);
+        profile.rows.upper = input_upper;
     }
+    // Restore column invariants after correcting the row point from population evidence.
+    for column in profile.columns.values_mut() {
+        column.cap_by_rows_mut(&profile.rows);
+    }
+    profile.equivalence_classes =
+        filter_owned_equivalence_classes(profile.equivalence_classes, &profile.columns);
     profile
 }
 
@@ -3505,14 +3578,10 @@ fn equality_edge_estimate(
             )
         })
         .flatten();
-    // Rusu-style: when both base tables have catalog samples, observe key presence instead of
-    // trusting inclusion (which systematically underestimates NOT EXISTS / anti when domains
-    // “overlap” in NDV but not in value sets).
-    let sample_match = (!null_safe)
-        .then(|| sample_key_match_probability(left_base, right_base, catalog))
-        .flatten();
-    let non_null_match_probability = sample_match
-        .or_else(|| sketch_match.map(|sketch| sketch.max(inclusion_non_null_match_probability)))
+    // Leaf-filter sampling policy: independent samples estimate filters, not join key presence.
+    // SpaceSaving may raise inclusion, but sparse sample overlap must never lower it.
+    let non_null_match_probability = sketch_match
+        .map(|sketch| sketch.max(inclusion_non_null_match_probability))
         .unwrap_or(inclusion_non_null_match_probability);
     EqualityEdgeEstimate {
         pair_selectivity: pair_selectivity.clamp(0.0, 1.0),
@@ -3531,7 +3600,8 @@ fn equality_edge_estimate(
     }
 }
 
-/// Rusu-inspired existence probability from catalog table samples (key presence in the right sample).
+/// Experimental existence probability; not used by default CE (independent samples are biased).
+#[allow(dead_code)]
 fn sample_key_match_probability(
     left_base: Option<&BaseColumn>,
     right_base: Option<&BaseColumn>,
@@ -3691,29 +3761,52 @@ fn estimated_distinct_intersection(
             domains_disjoint: false,
         };
     }
-    let Some((left_lower, left_upper, right_lower, right_upper)) = left
+    let ranges = left
         .lower_bound
         .as_ref()
         .zip(left.upper_bound.as_ref())
         .zip(right.lower_bound.as_ref().zip(right.upper_bound.as_ref()))
         .map(|((left_lower, left_upper), (right_lower, right_upper))| {
             (left_lower, left_upper, right_lower, right_upper)
-        })
-    else {
-        return DistinctIntersection {
-            distinct: left_distinct.min(right_distinct),
-            domains_disjoint: false,
-        };
-    };
+        });
 
-    if crate::catalog::scalar_order(left_upper, right_lower).is_some_and(|order| order.is_lt())
-        || crate::catalog::scalar_order(right_upper, left_lower).is_some_and(|order| order.is_lt())
-    {
+    if ranges.is_some_and(|(ll, lu, rl, ru)| {
+        crate::catalog::scalar_order(lu, rl).is_some_and(|order| order.is_lt())
+            || crate::catalog::scalar_order(ru, ll).is_some_and(|order| order.is_lt())
+    }) {
         return DistinctIntersection {
             distinct: 0.0,
             domains_disjoint: true,
         };
     }
+
+    // Only live population sketches are eligible. Filters/joins clear them. Never estimate
+    // intersection by HLL inclusion-exclusion: Ertl fits the joint register likelihood instead.
+    if let (Some(l), Some(r)) = (
+        left.sketches
+            .as_ref()
+            .and_then(|s| s.distinct_values.as_ref()),
+        right
+            .sketches
+            .as_ref()
+            .and_then(|s| s.distinct_values.as_ref()),
+    ) && let Ok((estimate, optd_sketches::JointEstimateQuality::Ok)) =
+        optd_sketches::estimate_joint(l, r)
+        && estimate.intersection.is_finite()
+    {
+        return DistinctIntersection {
+            distinct: estimate
+                .intersection
+                .clamp(0.0, left_distinct.min(right_distinct)),
+            domains_disjoint: false,
+        };
+    }
+    let Some((left_lower, left_upper, right_lower, right_upper)) = ranges else {
+        return DistinctIntersection {
+            distinct: left_distinct.min(right_distinct),
+            domains_disjoint: false,
+        };
+    };
 
     let overlap_lower = if crate::catalog::scalar_order(left_lower, right_lower)
         .is_some_and(|order| order.is_lt())
@@ -3750,10 +3843,7 @@ fn estimated_distinct_intersection(
         _ => left_distinct.min(right_distinct),
     };
 
-    // Do not derive set intersection through HLL inclusion-exclusion. It subtracts three noisy
-    // cardinality estimates and is practically unstable, especially when overlap is small.
-    // Use only sound disjoint-range detection and the existing range/NDV fallback until an
-    // intersection-capable sketch (for example Theta/KMV) or sampled overlap is available.
+    // Incompatible, unidentified, low-Jaccard, and failed fits retain the range/NDV fallback.
     DistinctIntersection {
         distinct,
         domains_disjoint: false,
@@ -7592,7 +7682,7 @@ mod tests {
         // 2 of 4 sample rows match; scale 400/4 → 200.
         assert_eq!(profile.rows.value, 200.0);
         assert_eq!(profile.rows.source, EstimateSource::Sample);
-        assert_eq!(profile.rows.lower, Some(0.0));
+        assert_eq!(profile.rows.lower, Some(2.0));
         assert_eq!(profile.rows.upper, Some(400.0));
     }
 
@@ -7701,6 +7791,143 @@ mod tests {
         // Joint: 2/4 → 200 rows. Independent product would yield 100.
         assert_eq!(profile.rows.value, 200.0);
         assert_eq!(profile.rows.source, EstimateSource::Sample);
+    }
+
+    #[test]
+    fn leaf_sample_whole_pipeline_bounds() {
+        use arrow_array::{Int64Array, RecordBatch};
+        use optd_sampling::{SampleProvenance, TableSample};
+
+        for population in [4, 400] {
+            let mut ctx = QueryContext::new();
+            let x = ColumnData::new("x", DataType::Int64).add(&mut ctx);
+            let y = ColumnData::new("y", DataType::Int64).add(&mut ctx);
+            let scan = OperatorData::Scan(Scan {
+                table: TableRef::bare("t"),
+                columns: vec![x, y],
+            })
+            .add(&mut ctx);
+            let mut eq = |column, value| {
+                let left = ExprData::ColumnRef(column).add(&mut ctx);
+                let right = ExprData::Literal(ScalarValue::Int64(value)).add(&mut ctx);
+                ExprData::Binary {
+                    op: BinaryOp::Eq,
+                    left,
+                    right,
+                }
+                .add(&mut ctx)
+            };
+            let a = eq(x, 1);
+            let b = eq(y, 1);
+            let absent = eq(y, 99);
+            let opposite = eq(x, 0);
+            let unknown = ExprData::Unary {
+                op: UnaryOp::IsNotNull,
+                expr: ExprData::ColumnRef(y).add(&mut ctx),
+            }
+            .add(&mut ctx);
+            let schema = Arc::new(Schema::new(vec![
+                Field::new("x", DataType::Int64, false),
+                Field::new("y", DataType::Int64, false),
+            ]));
+            let batch = RecordBatch::try_new(
+                schema.clone(),
+                vec![
+                    Arc::new(Int64Array::from(vec![1, 1, 0, 0])),
+                    Arc::new(Int64Array::from(vec![1, 0, 1, 0])),
+                ],
+            )
+            .unwrap();
+            let sample = TableSample::try_new(
+                schema.clone(),
+                vec![batch],
+                4,
+                population,
+                SampleProvenance::Past,
+            )
+            .unwrap();
+            let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+            catalog
+                .create_table(TableRef::bare("t"), schema, None)
+                .unwrap();
+            catalog
+                .set_table_samples(TableRef::bare("t"), sample)
+                .unwrap();
+            let mut analyses = AnalysisContext::new(catalog);
+            let first = OperatorData::Selection(Selection {
+                input: scan,
+                predicate: a,
+            })
+            .add(&mut ctx);
+
+            for (second, matches) in [(b, 1.0), (a, 2.0), (absent, 0.0), (opposite, 0.0)] {
+                for stacked in [false, true] {
+                    let predicate = if stacked {
+                        second
+                    } else {
+                        ExprData::Nary {
+                            op: NaryOp::And,
+                            exprs: vec![a, second],
+                        }
+                        .add(&mut ctx)
+                    };
+                    let selection = OperatorData::Selection(Selection {
+                        input: if stacked { first } else { scan },
+                        predicate,
+                    })
+                    .add(&mut ctx);
+                    let profile = analyses
+                        .get::<CardinalityEstimationV1>(&ctx, selection)
+                        .unwrap();
+                    assert_eq!(profile.rows.value, matches * population as f64 / 4.0);
+                    assert_eq!(profile.rows.lower, Some(matches));
+                    if second == opposite {
+                        assert_eq!(profile.rows.source, EstimateSource::Exact);
+                        assert_eq!(profile.rows.upper, Some(matches));
+                    } else {
+                        assert_eq!(profile.rows.source, EstimateSource::Sample);
+                        let upper = if population == 4 {
+                            matches
+                        } else {
+                            population as f64
+                        };
+                        assert_eq!(profile.rows.upper, Some(upper));
+                    }
+                    for column in profile.columns.values() {
+                        assert!(column.frequency.value <= profile.rows.value);
+                        assert!(column.distinct.value <= column.frequency.value);
+                    }
+                }
+            }
+            // Unsupported current or preceding predicates cannot provide sample witnesses.
+            for stacked in [false, true] {
+                let input = if stacked {
+                    OperatorData::Selection(Selection {
+                        input: scan,
+                        predicate: unknown,
+                    })
+                    .add(&mut ctx)
+                } else {
+                    scan
+                };
+                let predicate = if stacked {
+                    a
+                } else {
+                    ExprData::Nary {
+                        op: NaryOp::And,
+                        exprs: vec![a, unknown],
+                    }
+                    .add(&mut ctx)
+                };
+                let selection =
+                    OperatorData::Selection(Selection { input, predicate }).add(&mut ctx);
+                let profile = analyses
+                    .get::<CardinalityEstimationV1>(&ctx, selection)
+                    .unwrap();
+                assert_ne!(profile.rows.source, EstimateSource::Sample);
+                assert_eq!(profile.rows.lower, Some(0.0));
+            }
+        }
     }
 
     #[test]
@@ -8007,7 +8234,7 @@ mod tests {
 
         let profile = analyses.get::<CardinalityEstimationV1>(&ctx, join).unwrap();
 
-        // Umbra-style: samples do not join; Selinger/HLL path estimates the join.
+        // Independent samples are not joined; NDV/HLL statistics estimate the join.
         assert_ne!(profile.rows.source, EstimateSource::Sample);
         assert!(profile.rows.value.is_finite() && profile.rows.value > 0.0);
     }
@@ -8306,6 +8533,282 @@ mod tests {
     }
 
     #[test]
+    fn aggregation_scbc_uses_population_sample_and_preserves_joint_precedence() {
+        use arrow_array::{Int64Array, RecordBatch};
+        use optd_sampling::{SampleProvenance, TableSample};
+        let mut ctx = QueryContext::new();
+        let a = ColumnData::new("a", DataType::Int64).add(&mut ctx);
+        let b = ColumnData::new("b", DataType::Int64).add(&mut ctx);
+        let c = ColumnData::new("c", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("pairs"),
+            columns: vec![a, b, c],
+        })
+        .add(&mut ctx);
+        let ar = ExprData::ColumnRef(a).add(&mut ctx);
+        let br = ExprData::ColumnRef(b).add(&mut ctx);
+        let cr = ExprData::ColumnRef(c).add(&mut ctx);
+        let aggregation = OperatorData::Aggregation(Aggregation {
+            input: scan,
+            keys: vec![ar, br],
+            aggregates: vec![],
+        })
+        .add(&mut ctx);
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("a", DataType::Int64, true),
+            Field::new("b", DataType::Int64, false),
+            Field::new("c", DataType::Int64, false),
+        ]));
+        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
+        catalog
+            .create_table(TableRef::bare("pairs"), schema.clone(), None)
+            .unwrap();
+        let stats = || TableStatistics {
+            row_count: Some(100_000),
+            size_bytes: None,
+            column_statistics: ["a", "b", "c"]
+                .into_iter()
+                .map(|name| {
+                    (
+                        name.into(),
+                        ColumnStatistics {
+                            lower_bound: None,
+                            upper_bound: None,
+                            frequency: Some(100_000),
+                            distinct: Some(100),
+                            sketches: None,
+                            distribution: None,
+                        },
+                    )
+                })
+                .collect(),
+            column_groups: vec![],
+            constraints: Default::default(),
+        };
+        catalog
+            .set_table_statistics(TableRef::bare("pairs"), stats())
+            .unwrap();
+        let mut analyses = AnalysisContext::new(catalog.clone());
+        assert_eq!(
+            analyses
+                .get::<CardinalityEstimationV1>(&ctx, aggregation)
+                .unwrap()
+                .rows
+                .value,
+            10_000.0
+        );
+        let values: Vec<i64> = (0..200).map(|v| v % 100).collect();
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            vec![
+                Arc::new(Int64Array::from(values.clone())),
+                Arc::new(Int64Array::from(values.clone())),
+                Arc::new(Int64Array::from(values)),
+            ],
+        )
+        .unwrap();
+        catalog
+            .set_table_samples(
+                TableRef::bare("pairs"),
+                TableSample::try_new(
+                    schema.clone(),
+                    vec![batch],
+                    200,
+                    100_000,
+                    SampleProvenance::Past,
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        let mut analyses = AnalysisContext::new(catalog.clone());
+        let scbc = analyses
+            .get::<CardinalityEstimationV1>(&ctx, aggregation)
+            .unwrap();
+        assert_eq!(scbc.rows.value, 100.0);
+        for name in ["a", "b", "c"] {
+            let mut hll = ColumnSketches::new(100_000).hll();
+            for value in 0..100 {
+                hll.observe(&ScalarValue::Int64(value));
+            }
+            analyses
+                .set_column_sketches(TableRef::bare("pairs"), name, hll)
+                .unwrap();
+        }
+        let with_hll = analyses
+            .get::<CardinalityEstimationV1>(&ctx, aggregation)
+            .unwrap();
+        assert!((with_hll.rows.value - 100.0).abs() < 5.0);
+
+        let original = catalog
+            .table_samples(&TableRef::bare("pairs"))
+            .unwrap()
+            .unwrap();
+        let mut stale = original.clone();
+        stale.source_rows = 50_000;
+        catalog
+            .set_table_samples(TableRef::bare("pairs"), stale)
+            .unwrap();
+        let mut stale_analyses = AnalysisContext::new(catalog.clone());
+        assert_eq!(
+            stale_analyses
+                .get::<CardinalityEstimationV1>(&ctx, aggregation)
+                .unwrap()
+                .rows
+                .value,
+            10_000.0
+        );
+        catalog
+            .set_table_samples(TableRef::bare("pairs"), original)
+            .unwrap();
+
+        // Progress the sample through a selection; use adjusted profile NDVs, never base HLLs.
+        let fifty = ExprData::Literal(ScalarValue::Int64(50)).add(&mut ctx);
+        let predicate = ExprData::Binary {
+            op: BinaryOp::Lt,
+            left: ar,
+            right: fifty,
+        }
+        .add(&mut ctx);
+        let selection = OperatorData::Selection(crate::Selection {
+            input: scan,
+            predicate,
+        })
+        .add(&mut ctx);
+        let filtered_agg = OperatorData::Aggregation(Aggregation {
+            input: selection,
+            keys: vec![ar, br],
+            aggregates: vec![],
+        })
+        .add(&mut ctx);
+        let filtered = analyses
+            .get::<CardinalityEstimationV1>(&ctx, filtered_agg)
+            .unwrap();
+        assert!(
+            filtered.rows.value >= 50.0 && filtered.rows.value < 200.0,
+            "{}",
+            filtered.rows.value
+        );
+
+        let limited = OperatorData::Limit(crate::Limit {
+            input: scan,
+            offset: 0,
+            fetch: Some(10),
+        })
+        .add(&mut ctx);
+        let mapped = OperatorData::Map(Map {
+            input: scan,
+            computations: vec![],
+        })
+        .add(&mut ctx);
+        let joined = OperatorData::CrossProduct(crate::CrossProduct {
+            outer: scan,
+            inner: scan,
+        })
+        .add(&mut ctx);
+        let literal = ExprData::Literal(ScalarValue::Boolean(true)).add(&mut ctx);
+        let unsupported = OperatorData::Selection(crate::Selection {
+            input: scan,
+            predicate: literal,
+        })
+        .add(&mut ctx);
+        for unsupported_input in [limited, mapped, joined, unsupported] {
+            assert!(
+                sample_cardinality::try_grouping_sample_relation(
+                    unsupported_input,
+                    &ctx,
+                    &analyses
+                )
+                .unwrap()
+                .is_none()
+            );
+        }
+
+        // A catalog joint NDV remains authoritative even when the sample suggests 100 groups.
+        let mut joint_stats = stats();
+        joint_stats
+            .column_groups
+            .push(crate::ColumnGroupStatistics {
+                columns: crate::ColumnSet::try_new(vec![0, 1], 2).unwrap(),
+                cardinality: crate::CardinalityStatistics {
+                    population_rows: 100_000,
+                    non_null_rows: 100_000,
+                    distinct: Some(77),
+                    distinct_values: None,
+                },
+                source: ColumnGroupSource::SchemaPrefix,
+            });
+        catalog
+            .set_table_statistics(TableRef::bare("pairs"), joint_stats)
+            .unwrap();
+        let mut analyses = AnalysisContext::new(catalog.clone());
+        assert_eq!(
+            analyses
+                .get::<CardinalityEstimationV1>(&ctx, aggregation)
+                .unwrap()
+                .rows
+                .value,
+            77.0
+        );
+        let three_keys = OperatorData::Aggregation(Aggregation {
+            input: scan,
+            keys: vec![ar, br, cr],
+            aggregates: vec![],
+        })
+        .add(&mut ctx);
+        let partial_joint = analyses
+            .get::<CardinalityEstimationV1>(&ctx, three_keys)
+            .unwrap();
+        assert_eq!(partial_joint.rows.value, 100.0);
+        let mut stronger_joint = catalog
+            .table_by_ref(&TableRef::bare("pairs"))
+            .unwrap()
+            .statistics
+            .unwrap();
+        stronger_joint.column_groups[0].cardinality.distinct = Some(150);
+        catalog
+            .set_table_statistics(TableRef::bare("pairs"), stronger_joint)
+            .unwrap();
+        let mut stronger_analyses = AnalysisContext::new(catalog.clone());
+        assert_eq!(
+            stronger_analyses
+                .get::<CardinalityEstimationV1>(&ctx, three_keys)
+                .unwrap()
+                .rows
+                .value,
+            150.0
+        );
+
+        // Population facts reveal a NULL grouping value absent from the sparse reservoir.
+        let mut nullable_stats = stats();
+        nullable_stats.row_count = Some(100);
+        for (name, column) in &mut nullable_stats.column_statistics {
+            column.distinct = Some(1);
+            column.frequency = Some(if name == "a" { 99 } else { 100 });
+        }
+        catalog
+            .set_table_statistics(TableRef::bare("pairs"), nullable_stats)
+            .unwrap();
+        let batch = RecordBatch::try_new(
+            schema.clone(),
+            (0..3)
+                .map(|_| Arc::new(Int64Array::from(vec![0_i64; 10])) as arrow_array::ArrayRef)
+                .collect(),
+        )
+        .unwrap();
+        catalog
+            .set_table_samples(
+                TableRef::bare("pairs"),
+                TableSample::try_new(schema, vec![batch], 10, 100, SampleProvenance::Past).unwrap(),
+            )
+            .unwrap();
+        let mut analyses = AnalysisContext::new(catalog);
+        let null_groups = analyses
+            .get::<CardinalityEstimationV1>(&ctx, aggregation)
+            .unwrap();
+        assert!(null_groups.rows.value >= 2.0);
+    }
+
+    #[test]
     fn aggregation_prefers_hll_sketch_ndv_over_catalog_distinct() {
         // Catalog NDV can lag behind a live query-local HLL. Grouping should prefer the sketch.
         let mut ctx = QueryContext::new();
@@ -8362,9 +8865,7 @@ mod tests {
             .set_column_sketches(TableRef::bare("users"), "key", sketches)
             .unwrap();
 
-        let scan_profile = analyses
-            .get::<CardinalityEstimationV1>(&ctx, scan)
-            .unwrap();
+        let scan_profile = analyses.get::<CardinalityEstimationV1>(&ctx, scan).unwrap();
         assert_eq!(scan_profile.columns[&key].distinct.value, 2.0);
         assert!(scan_profile.columns[&key].sketches.is_some());
 
@@ -9150,6 +9651,97 @@ mod tests {
     }
 
     #[test]
+    fn join_intersection_uses_ertl_and_refuses_stale_or_unreliable_sketches() {
+        let make = |start, end| {
+            let mut profile = test_column_profile(100_000.0, 100_000.0);
+            let mut sketches = ColumnSketches::new(100_000).hll();
+            for value in start..end {
+                sketches.observe(&ScalarValue::Int64(value));
+            }
+            profile.sketches = Some(Arc::new(sketches));
+            profile
+        };
+        let left = make(0, 100_000);
+        let right = make(60_000, 160_000);
+        let intersection = estimated_distinct_intersection(&left, &right, 100_000.0, 100_000.0);
+        assert!(
+            (intersection.distinct - 40_000.0).abs() < 5_000.0,
+            "{intersection:?}"
+        );
+
+        // The normal filter propagation clears base-population sketches.
+        let mut ctx = QueryContext::new();
+        let key = ColumnData::new("key", DataType::Int64).add(&mut ctx);
+        let input = CardinalityProfile::new(
+            Estimate::exact(100_000.0),
+            [(key, left.clone())].into_iter().collect(),
+        );
+        let other_key = ColumnData::new("other_key", DataType::Int64).add(&mut ctx);
+        let other = CardinalityProfile::new(
+            Estimate::exact(100_000.0),
+            [(other_key, right.clone())].into_iter().collect(),
+        );
+        let predicate = equality_expr(&mut ctx, key, other_key);
+        let joined =
+            join_profile_from_conjuncts(&input, &other, JoinType::Inner, &[predicate], &ctx);
+        let semi =
+            join_profile_from_conjuncts(&input, &other, JoinType::LeftSemi, &[predicate], &ctx);
+        assert!((joined.rows.value - 40_000.0).abs() < 5_000.0);
+        assert!((semi.rows.value - 40_000.0).abs() < 5_000.0);
+
+        let filtered = scale_profile(input, 0.5, None);
+        assert!(filtered.columns[&key].sketches.is_none());
+        let filtered_left = &filtered.columns[&key];
+        let fallback = estimated_distinct_intersection(
+            filtered_left,
+            &right,
+            filtered_left.distinct.value,
+            100_000.0,
+        );
+        assert_eq!(fallback.distinct, filtered_left.distinct.value);
+
+        // Low Jaccard uses NDV fallback; no tiny noisy intersection escapes to CE.
+        let disjoint = make(100_000, 200_000);
+        assert_eq!(
+            estimated_distinct_intersection(&left, &disjoint, 100_000.0, 100_000.0).distinct,
+            100_000.0
+        );
+        let mut incompatible = right.clone();
+        Arc::make_mut(incompatible.sketches.as_mut().unwrap()).distinct_values =
+            Some(optd_sketches::HyperLogLog::with_config(10, 42, 1).unwrap());
+        assert_eq!(
+            estimated_distinct_intersection(&left, &incompatible, 100_000.0, 100_000.0).distinct,
+            100_000.0
+        );
+        let mut dominated_left = left.clone();
+        let mut dominated_right = right.clone();
+        for (profile, rank) in [(&mut dominated_left, 5), (&mut dominated_right, 2)] {
+            Arc::make_mut(profile.sketches.as_mut().unwrap()).distinct_values =
+                Some(optd_sketches::HyperLogLog::from_registers(4, 42, 1, vec![rank; 16]).unwrap());
+        }
+        assert_eq!(
+            estimated_distinct_intersection(
+                &dominated_left,
+                &dominated_right,
+                100_000.0,
+                100_000.0
+            )
+            .distinct,
+            100_000.0
+        );
+        let mut ranged_left = left.clone();
+        ranged_left.lower_bound = Some(ScalarValue::Int64(0));
+        ranged_left.upper_bound = Some(ScalarValue::Int64(10));
+        let mut ranged_right = right.clone();
+        ranged_right.lower_bound = Some(ScalarValue::Int64(20));
+        ranged_right.upper_bound = Some(ScalarValue::Int64(30));
+        assert!(
+            estimated_distinct_intersection(&ranged_left, &ranged_right, 100_000.0, 100_000.0)
+                .domains_disjoint
+        );
+    }
+
+    #[test]
     fn semi_and_anti_profiles_propagate_equality_key_domains() {
         let mut ctx = QueryContext::new();
         let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
@@ -9205,21 +9797,27 @@ mod tests {
     }
 
     #[test]
-    fn anti_join_uses_sample_key_presence_over_inclusion_ndv() {
+    fn left_semi_uses_inclusion_when_catalog_samples_would_underestimate() {
         use arrow_array::{Int64Array, RecordBatch};
         use optd_sampling::{SampleProvenance, TableSample};
 
-        // Inclusion with dL=4, dR=100 would claim every left key matches. Samples show only
-        // half of left keys appear on the right (Rusu-style presence), so anti ≈ 50%.
+        // Independent sparse samples have no shared keys, but the population NDVs nest.
+        // Sample key presence must not override inclusion for either semi or anti joins.
         let mut ctx = QueryContext::new();
         let left_key = ColumnData::new("c_custkey", DataType::Int64).add(&mut ctx);
         let right_key = ColumnData::new("o_custkey", DataType::Int64).add(&mut ctx);
         let predicate = equality_expr(&mut ctx, left_key, right_key);
 
-        let left_schema =
-            Arc::new(Schema::new(vec![Field::new("c_custkey", DataType::Int64, false)]));
-        let right_schema =
-            Arc::new(Schema::new(vec![Field::new("o_custkey", DataType::Int64, false)]));
+        let left_schema = Arc::new(Schema::new(vec![Field::new(
+            "c_custkey",
+            DataType::Int64,
+            false,
+        )]));
+        let right_schema = Arc::new(Schema::new(vec![Field::new(
+            "o_custkey",
+            DataType::Int64,
+            false,
+        )]));
         let left_batch = RecordBatch::try_new(
             left_schema.clone(),
             vec![Arc::new(Int64Array::from(vec![1_i64, 2, 3, 4]))],
@@ -9227,14 +9825,14 @@ mod tests {
         .unwrap();
         let right_batch = RecordBatch::try_new(
             right_schema.clone(),
-            vec![Arc::new(Int64Array::from(vec![1_i64, 2, 1, 2]))],
+            vec![Arc::new(Int64Array::from(vec![5_i64, 6, 5, 6]))],
         )
         .unwrap();
         let left_samples = TableSample::try_new(
             left_schema.clone(),
             vec![left_batch],
             4,
-            4,
+            1_000_000,
             SampleProvenance::Past,
         )
         .unwrap();
@@ -9242,7 +9840,7 @@ mod tests {
             right_schema.clone(),
             vec![right_batch],
             4,
-            100,
+            1_000_000,
             SampleProvenance::Past,
         )
         .unwrap();
@@ -9262,14 +9860,14 @@ mod tests {
             .unwrap();
 
         let left = CardinalityProfile::new(
-            Estimate::exact(4.0),
+            Estimate::exact(1_000_000.0),
             [(
                 left_key,
                 ColumnProfile {
                     lower_bound: None,
                     upper_bound: None,
-                    frequency: Estimate::exact(4.0),
-                    distinct: Estimate::exact(4.0),
+                    frequency: Estimate::exact(1_000_000.0),
+                    distinct: Estimate::exact(1_000_000.0),
                     value: Some(ValueId::Base(BaseColumn {
                         table: TableRef::bare("customer"),
                         name: "c_custkey".into(),
@@ -9283,15 +9881,15 @@ mod tests {
             .collect(),
         );
         let right = CardinalityProfile::new(
-            Estimate::exact(100.0),
+            Estimate::exact(1_000_000.0),
             [(
                 right_key,
                 ColumnProfile {
                     lower_bound: None,
                     upper_bound: None,
-                    frequency: Estimate::exact(100.0),
-                    // Inflated NDV would force inclusion match ≈ 1 without samples.
-                    distinct: Estimate::exact(100.0),
+                    frequency: Estimate::exact(1_000_000.0),
+                    // q4-style large, similarly sized domains with sparse independent samples.
+                    distinct: Estimate::exact(1_000_000.0),
                     value: Some(ValueId::Base(BaseColumn {
                         table: TableRef::bare("orders"),
                         name: "o_custkey".into(),
@@ -9314,11 +9912,17 @@ mod tests {
             &CardinalityEstimationConfig::default(),
             Some(catalog.as_ref()),
         );
-        assert!(
-            (anti.rows.value - 2.0).abs() < 1e-6,
-            "expected anti rows 2 from sample presence 0.5, got {}",
-            anti.rows.value
+        assert_eq!(anti.rows.value, 0.0);
+        let semi = join_profile_from_predicate_with_config(
+            &left,
+            &right,
+            JoinType::LeftSemi,
+            predicate,
+            &ctx,
+            &CardinalityEstimationConfig::default(),
+            Some(catalog.as_ref()),
         );
+        assert_eq!(semi.rows.value, left.rows.value);
     }
 
     #[test]

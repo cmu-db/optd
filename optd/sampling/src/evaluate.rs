@@ -131,7 +131,7 @@ impl SampleRelation {
         self.batches.iter().map(|batch| batch.num_rows()).sum()
     }
 
-    /// Umbra-style scaled cardinality estimate.
+    /// Sample row count scaled by the population-to-sample ratio.
     pub fn estimated_rows(&self) -> f64 {
         self.num_rows() as f64 * self.scale
     }
@@ -582,9 +582,8 @@ fn like_column(
         array
             .iter()
             .map(|cell| {
-                let matched = cell.is_some_and(|value| {
-                    sql_like_match(value, pattern, case_insensitive)
-                });
+                let matched =
+                    cell.is_some_and(|value| sql_like_match(value, pattern, case_insensitive));
                 Some(if negated { !matched } else { matched })
             })
             .collect::<Vec<_>>(),
@@ -835,11 +834,7 @@ mod tests {
     #[test]
     fn filters_date32_range_and_reports_zero_match_fraction() {
         use arrow_array::Date32Array;
-        let schema = Arc::new(Schema::new(vec![Field::new(
-            "d",
-            DataType::Date32,
-            true,
-        )]));
+        let schema = Arc::new(Schema::new(vec![Field::new("d", DataType::Date32, true)]));
         let batch = RecordBatch::try_new(
             schema.clone(),
             vec![Arc::new(Date32Array::from(vec![

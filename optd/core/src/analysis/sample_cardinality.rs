@@ -1,6 +1,6 @@
 //! Leaf sample selectivity helpers for [`super::CardinalityEstimationV1`].
 //!
-//! Catalog table samples estimate **selection predicate** selectivity (Umbra/Cedar style).
+//! Catalog table samples estimate **leaf selection predicate** selectivity.
 //! Column NDVs / sketches / equivalence classes stay on the classic V1 profile path so joins
 //! keep catalog distincts. This module never joins samples.
 
@@ -14,16 +14,60 @@ use crate::{
 
 use super::{AnalysisContext, AnalysisError, AnalysisResult};
 
-/// Loads a sample relation for a scan-pipeline operator (no joins), for per-conjunct selectivity.
+/// Loads the actual input population sample, applying every preceding selection.
+/// Unknown predicates and population-changing/unevaluated operators refuse sampling.
 pub(super) fn try_leaf_sample_relation(
     operator: Operator,
     ctx: &QueryContext,
     analyses: &AnalysisContext,
 ) -> AnalysisResult<Option<SampleRelation>> {
-    if !scan_pipeline_has_samples(operator, ctx, analyses)? {
-        return Ok(None);
+    evaluate_sample_tree(operator, ctx, analyses)
+}
+
+/// A sample of the actual scan-pipeline population for grouping estimation.
+///
+/// Like selection sampling, this applies every supported filter. Additionally, grouping
+/// requires matching population-size metadata. Unknown filters, renames/maps (whose names/values
+/// are not evaluated here), limits, and joins refuse SCBC.
+pub(super) fn try_grouping_sample_relation(
+    operator: Operator,
+    ctx: &QueryContext,
+    analyses: &AnalysisContext,
+) -> AnalysisResult<Option<SampleRelation>> {
+    match operator.get(ctx) {
+        OperatorData::Scan(scan) => {
+            // Samples are optional statistics: lookup failures must retain product fallback.
+            let Ok(Some(sample)) = scan_samples(scan, analyses) else {
+                return Ok(None);
+            };
+            let Ok(metadata) = analyses.catalog().table_by_ref(&scan.table) else {
+                return Ok(None);
+            };
+            if metadata
+                .statistics
+                .as_ref()
+                .and_then(|s| s.row_count)
+                .is_some_and(|rows| rows != sample.source_rows)
+            {
+                // A sample from another population size cannot correct current grouping NDVs.
+                return Ok(None);
+            }
+            Ok(SampleRelation::from_table_sample(&sample, &[]).ok())
+        }
+        OperatorData::Selection(data) => {
+            let Some(input) = try_grouping_sample_relation(data.input, ctx, analyses)? else {
+                return Ok(None);
+            };
+            let Some(predicate) = translate_predicate(data.predicate, ctx) else {
+                return Ok(None);
+            };
+            Ok(filter_relation(&input, &predicate).ok())
+        }
+        OperatorData::Projection(data) => try_grouping_sample_relation(data.input, ctx, analyses),
+        OperatorData::Output(data) => try_grouping_sample_relation(data.input, ctx, analyses),
+        OperatorData::Sort(data) => try_grouping_sample_relation(data.input, ctx, analyses),
+        _ => Ok(None),
     }
-    evaluate_sample_tree_no_filter(operator, ctx, analyses)
 }
 
 /// Conditional sample selectivity: match fraction on `relation`, then the filtered relation for
@@ -39,34 +83,25 @@ pub(super) fn sample_conjunct_selectivity_progressing(
     Some((selectivity, next))
 }
 
-fn scan_pipeline_has_samples(
-    operator: Operator,
-    ctx: &QueryContext,
-    analyses: &AnalysisContext,
-) -> AnalysisResult<bool> {
-    match operator.get(ctx) {
-        OperatorData::Scan(scan) => Ok(scan_samples(scan, analyses)?.is_some()),
-        OperatorData::Projection(data) => scan_pipeline_has_samples(data.input, ctx, analyses),
-        OperatorData::Output(data) => scan_pipeline_has_samples(data.input, ctx, analyses),
-        OperatorData::Sort(data) => scan_pipeline_has_samples(data.input, ctx, analyses),
-        OperatorData::Rename(data) => scan_pipeline_has_samples(data.input, ctx, analyses),
-        OperatorData::Selection(data) => scan_pipeline_has_samples(data.input, ctx, analyses),
-        _ => Ok(false),
-    }
-}
-
-fn evaluate_sample_tree_no_filter(
+fn evaluate_sample_tree(
     operator: Operator,
     ctx: &QueryContext,
     analyses: &AnalysisContext,
 ) -> AnalysisResult<Option<SampleRelation>> {
     match operator.get(ctx) {
         OperatorData::Scan(scan) => scan_relation(scan, analyses),
-        OperatorData::Selection(data) => evaluate_sample_tree_no_filter(data.input, ctx, analyses),
-        OperatorData::Projection(data) => evaluate_sample_tree_no_filter(data.input, ctx, analyses),
-        OperatorData::Output(data) => evaluate_sample_tree_no_filter(data.input, ctx, analyses),
-        OperatorData::Sort(data) => evaluate_sample_tree_no_filter(data.input, ctx, analyses),
-        OperatorData::Rename(data) => evaluate_sample_tree_no_filter(data.input, ctx, analyses),
+        OperatorData::Selection(data) => {
+            let Some(input) = evaluate_sample_tree(data.input, ctx, analyses)? else {
+                return Ok(None);
+            };
+            let Some(predicate) = translate_predicate(data.predicate, ctx) else {
+                return Ok(None);
+            };
+            Ok(filter_relation(&input, &predicate).ok())
+        }
+        OperatorData::Projection(data) => evaluate_sample_tree(data.input, ctx, analyses),
+        OperatorData::Output(data) => evaluate_sample_tree(data.input, ctx, analyses),
+        OperatorData::Sort(data) => evaluate_sample_tree(data.input, ctx, analyses),
         _ => Ok(None),
     }
 }

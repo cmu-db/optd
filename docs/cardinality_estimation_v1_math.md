@@ -38,9 +38,17 @@ building intermediate DP states.
 - Multiple equalities connecting the same classes should pick the strongest
   containment domain, not multiply all predicates.
 - Semi/anti joins should use match probability, not inner-join output rows.
-- Prefer Rusu-style sample key presence over inclusion NDV when both sides have catalog samples;
-  clamp inclusion NDVs to represented population (Postgres / Leis).
-- Aggregation grouping should prefer live HLL NDV when sketches remain on the input profile.
+- Use leaf samples for filter selectivity and NDV coverage for joins, not independent-sample
+  join key presence.
+  Clamp inclusion NDVs to represented population (Postgres / Leis). Our compatible live-HLL
+  intersection estimator is Ertl joint Poisson MLE; reject low-Jaccard (<0.05), unidentified,
+  incompatible, or failed fits and retain range/NDV fallback. Never use HLL inclusion–exclusion.
+- Aggregation grouping prefers live HLL NDV when sketches remain on the input profile.
+  Without a fully covering joint NDV, multi-key grouping uses sketch-corrected bound-corrected
+  (SCBC) NDV estimation when a population sample is available: `sqrt(L_SCBC * U_SCBC) + sum_{i>=2} f_i` (CIDR 2019, equations 16–18),
+  capped by observed, marginal, product, and input-row sanity bounds. Tuple/per-column sample
+  frequencies tighten singleton bounds. Reservoir sampling uses the without-replacement lower
+  bound from §3.2; filtered samples use adjusted profile NDVs, never stale base HLLs.
 - Outer joins need preserved-side lower bounds without losing the expected inner-match estimate,
   and must not propagate ON-condition equality across null-extended rows.
 

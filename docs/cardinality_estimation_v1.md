@@ -77,7 +77,18 @@ cap, monotonicity, and NULL preservation; unsupported or potentially overflowing
 the stable unknown-column fallback. Computed outputs never inherit base sketches, and
 expression-specific lineage variants remain intentionally avoided.
 
-`Selection` splits conjuncts and applies predicate selectivity one predicate at a time. Equality
+`Selection` first attempts whole-predicate sampling over the complete scan-filter pipeline
+(scan/projection/sort/output, including preceding selections). All predicates must be evaluable;
+unsupported predicates, maps, renames, joins, and limits refuse this path. Matching sample rows
+provide the lower bound, the population-scaled count provides the point estimate, and the input
+upper bound is retained. By design, past samples remain reusable population evidence. A full
+population sample has equal model-relative endpoints but retains `Sample` provenance: historical
+coverage is not a logical proof about the current population. Zero matches in a partial sample
+do not prove emptiness. Logical contradictions take precedence and yield exact zero. Column NDVs remain on the ordinary
+profile-propagation path, using conditional sample fractions rather than independent marginals.
+
+Without a fully evaluable sample pipeline, `Selection` splits conjuncts and applies predicate
+selectivity one predicate at a time, without treating heuristic selectivity as a row bound. Equality
 predicates use NDV; range predicates use known bounds when available; unsupported predicates fall
 back to defaults. Literal equality yields at most one NDV, inequality removes one modeled value, and
 ordered comparisons proportionally restrict NDV while tightening bounds (including strict discrete
@@ -86,10 +97,17 @@ instead of only capping the old NDV by output rows.
 
 `Aggregation` estimates group count from grouping-key distinct counts, capped by input rows.
 Semantic uniqueness wins first. Otherwise, the estimator uses the largest compatible joint NDV once
-and multiplies single-column NDVs only for uncovered keys. Per-key distinct prefers a live HLL sketch
-when the input profile still carries one (catalog NDV alone can lag); filters/joins that change the
-population still invalidate sketches. Grouping columns preserve adjusted profiles; aggregate output
-columns start conservative except for simple count-like bounds.
+and multiplies single-column NDVs only for uncovered keys. Without a fully covering joint NDV,
+multi-key grouping first tries sketch-corrected bound-corrected (SCBC) NDV estimation using tuple
+and per-column frequencies from a population sample.
+Partial joint NDVs constrain the SCBC result from below. The sample walker progresses supported
+filters over scan/projection/sort/output pipelines; stale sample population metadata, joins,
+limits, renames, maps, unknown predicates, missing columns, and unsupported sample types fall back
+to the product path. Empty or undersized samples also fall back. Per-key distinct prefers a live HLL
+sketch when present; filters/joins invalidate base sketches, so filtered SCBC uses adjusted profile
+NDVs, never base HLLs. NULL is a grouping value in SCBC, including population-known NULLs
+that miss a sparse sample. Grouping columns preserve adjusted
+profiles; aggregate output columns start conservative except for simple count-like bounds.
 
 `Sort` preserves profiles.
 
@@ -117,21 +135,26 @@ semi/anti equality, directional coverage starts from Leis/Postgres inclusion:
 left_non_null_fraction * intersection_ndv / left_ndv
 ```
 
-with NDVs clamped to non-null frequency and row count. When both join keys resolve to base tables
-with catalog samples, Rusu-style key-presence sampling overrides inclusion
-(`P(match) ≈ fraction of left sample rows whose key appears in the right sample key set`).
-SpaceSaving sketch match can raise inclusion when samples are unavailable. When an equality match
+with NDVs clamped to non-null frequency and row count. Leaf samples estimate filter selectivity,
+not join key-presence probabilities; joins use NDV coverage instead. Sparse samples systematically
+miss real matches. SpaceSaving sketch match can raise inclusion. See the
+[implementation plan](superpowers/plans/2026-11-13-ce-leaf-sampling-hll-intersection-scbc.md). When an equality match
 has estimated conditional fanout `f` and residual predicates have pair selectivity `r`, semi/anti
 survival uses `1 - (1 - r)^f`, rather than incorrectly multiplying the match probability by `r`.
 Compatible ordered ranges detect disjoint domains and estimate numeric/date overlap under
-uniformity. SpaceSaving common values refine known matched left-row mass without letting duplicate
+uniformity. Before the range-fraction fallback, compatible live HLLs use **joint Poisson maximum
+likelihood** (Ertl) for domain intersection, never HLL inclusion–exclusion. Ertl rejects unidentified, failed, or low-Jaccard fits (`ERTL_MIN_JACCARD = 0.05`)
+and falls back to range/NDV containment. Disjoint ranges still take precedence. Compatibility
+requires equal precision, hash seed, and value-encoding version. Only surviving base-population
+sketches qualify; filtered/joined profiles do not invent replacement HLLs.
+SpaceSaving common values refine known matched left-row mass without letting duplicate
 right rows inflate coverage; uncertain counters cannot lower the uniform baseline. Semi output key
 profiles are capped by the intersection domain, and pure single-key anti joins propagate
 complementary unmatched frequency and NDV. Catalog unique/FK assertions provide stronger estimates
 only while the required base population is complete. Direct-column composite inner equalities may
 consume one compatible joint NDV from either input, with normalized edge orientation and per-edge
 fallback only for uncovered equalities. Multi-column histograms, joint NDVs beyond schema-prefix
-HLLs, and intersection-capable sketches remain future work.
+HLLs remain future work.
 
 Transient or redundant equality edges should be treated specially for costing.
 They may need to remain in the IR for execution or backend behavior, but CE
@@ -180,8 +203,10 @@ minimum, maintaining `lower <= value <= upper`.
 - [x] Collect query-local HLLs for leading logical-schema prefixes through length five.
 - [x] Consume population-safe joint NDV for grouping and direct composite inner equalities.
 - [x] Replace uniform range overlap with histograms/samples (leaf samples + MCV/hist; progressive sample ANDs).
-- [x] Prefer catalog-sample key presence for semi/anti match probability (Rusu); clamp inclusion NDVs.
+- [x] Use leaf-filter sampling with NDV-based joins: leaf samples for filters, no sample-presence override; clamp inclusion NDVs.
 - [x] Prefer live HLL sketch NDV for aggregation grouping keys when sketches survive on the input.
+- [x] Estimate compatible live HLL domain intersections by Ertl joint MLE with quality gating.
+- [x] Use sketch-corrected bound-corrected NDV estimation (SCBC) for multi-column grouping without fully covering joint NDVs, when a population sample is available.
 - [ ] Add catalog **joint NDVs** beyond leading schema-prefix HLLs (correlated filters/joins/groupby).
 - [ ] Add **multi-column histograms** (or sampled column groups) for residual/correlated predicates.
 - [ ] Persist and refresh compatible sketches through a production catalog statistics provider.

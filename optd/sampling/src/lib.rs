@@ -4,6 +4,9 @@
 //! (or future current-run) reservoirs without embedding raw batches inside summary statistics.
 
 mod evaluate;
+mod sketch_corrected_ndv;
+
+pub use sketch_corrected_ndv::estimate_grouping_scbc;
 
 pub use evaluate::{
     SampleCompareOp, SamplePredicate, SampleRelation, SampleScalar, equijoin_relations,

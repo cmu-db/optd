@@ -2,7 +2,7 @@
 
 ## Goal
 
-Add catalog-backed table samples and use them for Umbra-style sample-driven
+Add catalog-backed table samples and use them for population-scaled sample-driven
 cardinality estimation, then LpBound pessimistic bounds — delivered as three
 stacked branches.
 
