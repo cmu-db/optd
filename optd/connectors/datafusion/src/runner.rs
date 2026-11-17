@@ -659,6 +659,50 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn physical_path_executes_conjunctive_in_with_nulls_and_duplicates() {
+        let runner = physical_runner();
+        // Use catalog-backed nullable columns: nullable VALUES literals currently fail
+        // import before optimization, which would not exercise this rewrite at all.
+        for (name, values) in [
+            ("conjunct_lhs", vec![Some(1), Some(1), Some(2), None]),
+            ("conjunct_rhs", vec![Some(1), Some(1), None]),
+        ] {
+            let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]));
+            let batch = RecordBatch::try_new(
+                Arc::clone(&schema),
+                vec![Arc::new(Int64Array::from(values)) as ArrayRef],
+            )
+            .unwrap();
+            let table = MemTable::try_new(schema, vec![vec![batch]]).unwrap();
+            runner
+                .session
+                .register_table(name, Arc::new(table))
+                .unwrap();
+        }
+        let (_, batches, path) = runner
+            .try_via_ir_with_path(
+                "SELECT id FROM conjunct_lhs \
+                 WHERE id > 0 AND id IN (SELECT id FROM conjunct_rhs)",
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(path, IrExecutionPath::Physical);
+        assert_eq!(
+            batches.iter().map(|batch| batch.num_rows()).sum::<usize>(),
+            2
+        );
+        for batch in batches {
+            let values = batch
+                .column(0)
+                .as_any()
+                .downcast_ref::<Int64Array>()
+                .unwrap();
+            assert!(values.iter().all(|value| value == Some(1)));
+        }
+    }
+
+    #[tokio::test]
     async fn physical_path_executes_aggregate() {
         let runner = physical_runner();
         let (_, batches, path) = runner

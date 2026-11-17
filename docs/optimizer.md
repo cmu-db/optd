@@ -87,6 +87,12 @@ this section when the architecture changes, while treating `default_pass_manager
 6. Verify convergence and run checks appropriate to the changed surface in `docs/development.md`.
 7. Update this document when the pipeline or framework contract changes.
 
+`SubqueryToJoin` treats each mandatory top-level AND conjunct as a filter context. Positive
+IN/EXISTS conjuncts lower directly to semi joins and NOT EXISTS to anti joins; NOT IN still
+requires a two-sided non-null proof before anti lowering. OR, CASE, and projected subquery
+values retain scalar/mark semantics. This avoids manufacturing two IN markers plus a CASE
+when the value is used only to retain definite matches in WHERE.
+
 Ordering is semantic. For example, expression cleanup and unnesting must occur before passes that
 rely on explicit join shapes. Add or update a pipeline-order test when introducing such a dependency.
 

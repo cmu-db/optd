@@ -6,7 +6,7 @@
 //!   column; that column is joined in and the expression is replaced with a
 //!   `ColumnRef` to it.
 //!
-//! - `Exists` and positive `InSubquery` as the **direct predicate** of a
+//! - `Exists` and positive `InSubquery` as a **top-level conjunct** of a
 //!   `Selection` → `JoinType::LeftSemi`. `NOT EXISTS` → `JoinType::LeftAnti`.
 //!   `NOT IN` only becomes `LeftAnti` when both sides are proven non-null;
 //!   otherwise it is left unchanged to preserve SQL three-valued logic.
@@ -108,9 +108,8 @@ fn rewrite_operator(op: Operator, ctx: &mut OptimizerContext) -> Option<Operator
     }
 }
 
-/// Rewrites a `Selection`. If the predicate is a bare `Exists`/`InSubquery`
-/// (or its negation), we emit a semi/anti join directly. Otherwise we lift
-/// subqueries from the predicate expression into mark joins.
+/// Rewrites mandatory filter conjuncts directly to semi/anti joins where safe.
+/// Only AND is flattened: OR, CASE, and other value contexts retain mark semantics.
 fn rewrite_selection(
     _op: Operator,
     sel: crate::Selection,
@@ -124,14 +123,50 @@ fn rewrite_selection(
         return None;
     }
 
-    // --- general case: lift subqueries from predicate into mark/single joins ---
     let mut input = sel.input;
-    let mut predicate = sel.predicate;
-    if lift_subqueries_from_expr(predicate, &mut input, ctx).apply_to(&mut predicate) {
-        let new_op = OperatorData::Selection(Selection { predicate, input }).add(&mut ctx.query);
-        Some(new_op)
+    let mut remaining = Vec::new();
+    let mut changed = false;
+    for mut predicate in filter_conjuncts(sel.predicate, &ctx.query) {
+        let conjunct = Selection { predicate, input };
+        if let Some(join) = try_direct_semijoin(&conjunct, ctx) {
+            input = join;
+            changed = true;
+        } else {
+            // Non-conjunctive subquery uses still need their scalar/three-valued result.
+            changed |=
+                lift_subqueries_from_expr(predicate, &mut input, ctx).apply_to(&mut predicate);
+            remaining.push(predicate);
+        }
+    }
+    if !changed {
+        return None;
+    }
+    if remaining.is_empty() {
+        return Some(input);
+    }
+    let predicate = if remaining.len() == 1 {
+        remaining[0]
     } else {
-        None
+        ExprData::Nary {
+            op: crate::NaryOp::And,
+            exprs: remaining,
+        }
+        .add(&mut ctx.query)
+    };
+    Some(OperatorData::Selection(Selection { predicate, input }).add(&mut ctx.query))
+}
+
+/// Only top-level AND operands are individually required to evaluate to TRUE by WHERE.
+fn filter_conjuncts(predicate: Expr, query: &crate::QueryContext) -> Vec<Expr> {
+    match predicate.get(query) {
+        ExprData::Nary {
+            op: crate::NaryOp::And,
+            exprs,
+        } => exprs
+            .iter()
+            .flat_map(|expr| filter_conjuncts(*expr, query))
+            .collect(),
+        _ => vec![predicate],
     }
 }
 
@@ -1014,6 +1049,129 @@ mod tests {
         assert_eq!(j.join_type, JoinType::Single);
         let (_, expr) = m.computations[0];
         assert!(matches!(ctx.expr(expr), ExprData::ColumnRef(_)));
+    }
+
+    /// Filter-context IN remains a semi join even when nested in AND. Neither NULL
+    /// ambiguity markers nor a CASE are needed: WHERE keeps only definite matches.
+    #[test]
+    fn conjunctive_in_and_exists_become_semi_joins() {
+        let mut ctx = QueryContext::new();
+        let lhs = ColumnData::new("lhs", DataType::Int64).add(&mut ctx);
+        let rhs = ColumnData::new("rhs", DataType::Int64).add(&mut ctx);
+        let outer = OperatorData::Scan(Scan {
+            table: TableRef::bare("outer_t"),
+            columns: vec![lhs],
+        })
+        .add(&mut ctx);
+        let inner = OperatorData::Scan(Scan {
+            table: TableRef::bare("inner_t"),
+            columns: vec![rhs],
+        })
+        .add(&mut ctx);
+        let lhs_ref = ExprData::ColumnRef(lhs).add(&mut ctx);
+        let residual = ExprData::Binary {
+            op: BinaryOp::Gt,
+            left: lhs_ref,
+            right: ExprData::Literal(ScalarValue::Int64(0)).add(&mut ctx),
+        }
+        .add(&mut ctx);
+        let membership = ExprData::InSubquery {
+            expr: lhs_ref,
+            subquery: inner,
+            negated: false,
+        }
+        .add(&mut ctx);
+        let exists = ExprData::Exists {
+            subquery: inner,
+            negated: false,
+        }
+        .add(&mut ctx);
+        let nested = ExprData::Nary {
+            op: crate::NaryOp::And,
+            exprs: vec![membership, exists],
+        }
+        .add(&mut ctx);
+        let predicate = ExprData::Nary {
+            op: crate::NaryOp::And,
+            exprs: vec![residual, nested],
+        }
+        .add(&mut ctx);
+        let selection = OperatorData::Selection(Selection {
+            input: outer,
+            predicate,
+        })
+        .add(&mut ctx);
+        ctx.set_root(selection);
+        let mut opt = crate::test_optimizer_context(ctx);
+        let mut pm = PassManager::new();
+        pm.add_pass(SubqueryToJoin);
+        pm.run(&mut opt).unwrap();
+        let root = opt.query.root().unwrap();
+        let OperatorData::Selection(selection) = root.get(&opt.query) else {
+            panic!("expected residual selection");
+        };
+        assert_eq!(selection.predicate, residual);
+        let OperatorData::Join(exists_join) = selection.input.get(&opt.query) else {
+            panic!("expected EXISTS semi join");
+        };
+        assert_eq!(exists_join.join_type, JoinType::LeftSemi);
+        let OperatorData::Join(in_join) = exists_join.outer.get(&opt.query) else {
+            panic!("expected IN semi join");
+        };
+        assert_eq!(in_join.join_type, JoinType::LeftSemi);
+        assert_eq!(in_join.outer, outer);
+        assert_eq!(in_join.inner, inner);
+        assert!(matches!(
+            in_join.on.get(&opt.query),
+            ExprData::Binary {
+                op: BinaryOp::Eq,
+                ..
+            }
+        ));
+        assert_eq!(SubqueryToJoin.run(&mut opt).unwrap(), PassResult::Unchanged);
+        // Existing payloads remain immutable.
+        assert!(matches!(
+            membership.get(&opt.query),
+            ExprData::InSubquery { .. }
+        ));
+    }
+
+    #[test]
+    fn conjunctive_not_exists_becomes_anti_join() {
+        let mut ctx = QueryContext::new();
+        let col = ColumnData::new("key", DataType::Int64).add(&mut ctx);
+        let scan = OperatorData::Scan(Scan {
+            table: TableRef::bare("t"),
+            columns: vec![col],
+        })
+        .add(&mut ctx);
+        let not_exists = ExprData::Exists {
+            subquery: scan,
+            negated: true,
+        }
+        .add(&mut ctx);
+        let predicate = ExprData::Nary {
+            op: crate::NaryOp::And,
+            exprs: vec![
+                ExprData::Literal(ScalarValue::Boolean(true)).add(&mut ctx),
+                not_exists,
+            ],
+        }
+        .add(&mut ctx);
+        let selection = OperatorData::Selection(Selection {
+            input: scan,
+            predicate,
+        })
+        .add(&mut ctx);
+        ctx.set_root(selection);
+        let ctx = run_pass(ctx);
+        let OperatorData::Selection(selection) = ctx.root().unwrap().get(&ctx) else {
+            panic!("expected residual predicate");
+        };
+        let OperatorData::Join(join) = selection.input.get(&ctx) else {
+            panic!("expected anti join");
+        };
+        assert_eq!(join.join_type, JoinType::LeftAnti);
     }
 
     /// Plan with no subqueries is unchanged.
