@@ -10,6 +10,7 @@ pub mod entity;
 mod error;
 pub mod index;
 pub mod migration;
+pub mod query_history;
 pub mod relation;
 pub mod schema;
 pub mod snapshot;

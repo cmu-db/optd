@@ -10,13 +10,17 @@ use optd_core::{CardinalityEstimationV1, FreeColumns, QueryFormatConfig};
 use optd_datafusion::config::OptdExtensionConfig;
 use optd_datafusion::explain_udfs::ExplainStep;
 use optd_datafusion::persistent_catalog::{idempotent_import_guard, install_persistent_catalog};
+use optd_datafusion::query_history::{CapturePolicy, QueryHistoryOptions};
 use optd_datafusion::runner::{OptdRunner, RunnerOutput};
 use optd_datafusion::setup::{
     register_job_tables, register_tpch_tables, session_context_with_information_schema,
 };
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
-use sea_orm::Database;
+use sea_orm::{
+    SqlxSqliteConnector,
+    sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions},
+};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -56,6 +60,14 @@ struct Args {
     #[arg(long, value_name = "PATH")]
     catalog_db: Option<PathBuf>,
 
+    /// Persist optimization request history. Templates can contain sensitive identifiers/literals.
+    #[arg(long, requires = "catalog_db")]
+    query_history: bool,
+
+    /// Also store raw SQL, extracted values and planning error details in query history.
+    #[arg(long, requires = "query_history")]
+    capture_query_input: bool,
+
     /// Suppress optimizer-step logging before each statement.
     #[arg(long)]
     no_log_explain_steps: bool,
@@ -84,7 +96,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         session_context_with_information_schema()
     };
     let catalog_db = if let Some(path) = args.catalog_db.as_ref() {
-        let db = Database::connect(format!("sqlite://{}?mode=rwc", path.display())).await?;
+        let options = SqliteConnectOptions::new()
+            .filename(std::path::absolute(path)?)
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await?;
+        let db = SqlxSqliteConnector::from_sqlx_sqlite_pool(pool);
         install_persistent_catalog(&session, "datafusion", db.clone()).await?;
         Some(db)
     } else {
@@ -105,6 +124,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let runner = match catalog_db.as_ref() {
         Some(db) => OptdRunner::new_with_persistent_catalog(session, "datafusion", db.clone()),
         None => OptdRunner::new(session),
+    };
+    let runner = if args.query_history {
+        runner.with_query_history(QueryHistoryOptions {
+            capture: if args.capture_query_input {
+                CapturePolicy::Full
+            } else {
+                CapturePolicy::TemplateOnly
+            },
+            ..Default::default()
+        })?
+    } else {
+        runner
     };
 
     if args.commands.is_empty() && args.files.is_empty() {
@@ -220,7 +251,14 @@ async fn execute_statement(runner: &OptdRunner, statement: &str) -> Result<(), B
         eprintln!("{err}");
     }
 
-    match runner.execute_sql(statement).await? {
+    let execution = runner.execute_sql_with_history(statement).await;
+    if let Some(history) = &execution.history {
+        eprintln!("optd query instance: {}", history.instance_id);
+        if !history.issues.is_empty() {
+            eprintln!("optd query history incomplete: {:?}", history.issues);
+        }
+    }
+    match execution.result? {
         RunnerOutput::StatementComplete => println!("OK"),
         RunnerOutput::Rows { schema, batches } => {
             let batches = if batches.is_empty() {

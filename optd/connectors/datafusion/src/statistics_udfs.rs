@@ -321,6 +321,24 @@ pub(crate) async fn build_persistent_statistics_catalog(
     catalog_name: &str,
     plan: &datafusion::logical_expr::LogicalPlan,
 ) -> DFResult<Arc<dyn optd_core::Catalog>> {
+    Ok(
+        build_persistent_statistics_with_snapshot(session, db, catalog_name, plan)
+            .await?
+            .catalog,
+    )
+}
+
+pub(crate) struct PersistentPlanningCatalog {
+    pub catalog: Arc<dyn optd_core::Catalog>,
+    pub snapshot_id: optd_catalog::SnapshotId,
+}
+
+pub(crate) async fn build_persistent_statistics_with_snapshot(
+    session: &SessionContext,
+    db: DatabaseConnection,
+    catalog_name: &str,
+    plan: &datafusion::logical_expr::LogicalPlan,
+) -> DFResult<PersistentPlanningCatalog> {
     let catalog = crate::persistent_catalog::catalog_for_name(db, catalog_name).await?;
     let reader = catalog.reader().await.map_err(external_error)?;
     let schemas = reader.get_all_schemas().await.map_err(external_error)?;
@@ -392,7 +410,10 @@ pub(crate) async fn build_persistent_statistics_catalog(
             .map_err(external_error)?;
     }
 
-    Ok(memory)
+    Ok(PersistentPlanningCatalog {
+        catalog: memory,
+        snapshot_id: reader.snapshot_id(),
+    })
 }
 
 fn resolve_relation<'a>(

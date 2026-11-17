@@ -6,6 +6,8 @@ pub mod column_statistics;
 pub mod index;
 pub mod metadata;
 pub mod prelude;
+pub mod query;
+pub mod query_instance;
 pub mod relation;
 pub mod schema;
 pub mod snapshot;

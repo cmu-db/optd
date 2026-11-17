@@ -1023,6 +1023,9 @@ async fn failed_additive_migration_rolls_back_ddl_and_can_retry() {
         .await
         .unwrap();
     Migrator::up(&db, None).await.unwrap();
-    assert_eq!(count(&db, "seaql_migrations").await, 4);
+    assert_eq!(
+        count(&db, "seaql_migrations").await,
+        i64::try_from(Migrator::migrations().len()).unwrap()
+    );
     assert_eq!(count(&db, "optd_adv_stats").await, 0);
 }

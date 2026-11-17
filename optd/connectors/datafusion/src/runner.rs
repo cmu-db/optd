@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use datafusion::arrow::array::RecordBatch;
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::common::TableReference;
+use datafusion::execution::session_state::SessionState;
 use datafusion::logical_expr::LogicalPlan;
 use datafusion::physical_plan::{collect, displayable};
 use datafusion::physical_planner::DefaultPhysicalPlanner;
@@ -18,6 +19,7 @@ use datafusion_optimizer::analyzer::type_coercion::TypeCoercion;
 use datafusion_sqllogictest::{
     DFColumnType, DFSqlLogicTestError, convert_batches, convert_schema_to_types,
 };
+use optd_catalog::query_history::QueryStatus;
 use optd_core::{
     Catalog, ExprSimplify, HolisticUnnesting, JoinOrdering, JoinTreeNormalize, MarkJoinToSemiJoin,
     OperatorRewriteAdaptor, OptimizerContext, PassManager, PlannedQuery, PredicatePushdown,
@@ -32,8 +34,9 @@ use crate::explain_udfs::{
 };
 use crate::from_df_logical::from_logical_plan;
 use crate::observed_execution::{StatementObservation, execute_observed_sql};
+use crate::query_history::{QueryHistory, QueryHistoryOptions, QueryHistoryReport, RequestHistory};
 use crate::runtime_statistics::RuntimeStatisticsCatalogBuilder;
-use crate::statistics_udfs::build_persistent_statistics_catalog;
+use crate::statistics_udfs::build_persistent_statistics_with_snapshot;
 use crate::to_df_logical::to_logical_plan;
 use crate::to_df_physical::{ToPhysicalError, to_physical_plan};
 
@@ -116,6 +119,7 @@ pub struct OptdRunner {
     session: SessionContext,
     statistics_source: StatisticsSource,
     last_observation: Mutex<Option<StatementObservation>>,
+    query_history: Option<QueryHistory>,
 }
 
 /// Statistics source used while constructing query-local planner catalogs.
@@ -145,6 +149,12 @@ impl std::fmt::Display for TryViaIrError {
 
 impl std::error::Error for TryViaIrError {}
 
+/// Result and independent, per-call history acknowledgments.
+pub struct RunnerExecution {
+    pub result: Result<RunnerOutput, DFSqlLogicTestError>,
+    pub history: Option<QueryHistoryReport>,
+}
+
 pub enum RunnerOutput {
     StatementComplete,
     Rows {
@@ -168,6 +178,7 @@ impl OptdRunner {
             session,
             statistics_source: StatisticsSource::Runtime(runtime_stats),
             last_observation: Mutex::new(None),
+            query_history: None,
         }
     }
 
@@ -188,7 +199,23 @@ impl OptdRunner {
                 catalog_name: catalog_name.into(),
             },
             last_observation: Mutex::new(None),
+            query_history: None,
         }
+    }
+
+    /// Enables SQL request history in this runner's persistent metadata database.
+    /// Runtime-only runners are rejected: snapshot references must share that database.
+    pub fn with_query_history(
+        mut self,
+        options: QueryHistoryOptions,
+    ) -> datafusion::error::Result<Self> {
+        let StatisticsSource::Persistent { db, .. } = &self.statistics_source else {
+            return Err(datafusion::error::DataFusionError::Plan(
+                "query history requires a persistent catalog".into(),
+            ));
+        };
+        self.query_history = Some(QueryHistory::new(db.clone(), options));
+        Ok(self)
     }
 
     pub fn optd_enabled(&self) -> bool {
@@ -231,27 +258,113 @@ impl OptdRunner {
     }
 
     pub async fn execute_sql(&self, sql: &str) -> Result<RunnerOutput, DFSqlLogicTestError> {
+        self.execute_sql_with_history(sql).await.result
+    }
+
+    /// Executes unchanged input and reports history failures separately, including
+    /// when the query itself fails. Dropped futures may leave unfinished instances.
+    pub async fn execute_sql_with_history(&self, sql: &str) -> RunnerExecution {
         *self
             .last_observation
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
-        let (schema, batches) = if self.optd_enabled() {
-            match self.try_via_ir(sql).await {
-                Ok(pair) => pair,
-                Err(TryViaIrError::Unsupported(_)) => {
-                    // IR conversion failed or unsupported — execute directly via DataFusion.
+        let state = self.session.state();
+        let config = state
+            .config_options()
+            .extensions
+            .get::<OptdExtensionConfig>()
+            .cloned()
+            .unwrap_or_default();
+        let mut history = match &self.query_history {
+            Some(store) => {
+                let statistics_catalog = match &self.statistics_source {
+                    StatisticsSource::Persistent { catalog_name, .. } => Some(catalog_name),
+                    StatisticsSource::Runtime(_) => None,
+                };
+                let configuration = serde_json::json!({
+                    "statistics_catalog": statistics_catalog,
+                    "optd_enabled": config.optd_enabled,
+                    "physical_planning": config.physical_planning,
+                    "log_explain_steps": config.log_explain_steps,
+                    "target_partitions": state.config().target_partitions(),
+                });
+                Some(store.begin(&state, sql, configuration).await)
+            }
+            None => None,
+        };
+        let result = self
+            .execute_request(sql, &state, &config, history.as_mut())
+            .await;
+        RunnerExecution {
+            result,
+            history: history.map(RequestHistory::into_report),
+        }
+    }
+
+    async fn execute_request(
+        &self,
+        sql: &str,
+        state: &SessionState,
+        config: &OptdExtensionConfig,
+        mut history: Option<&mut RequestHistory<'_>>,
+    ) -> Result<RunnerOutput, DFSqlLogicTestError> {
+        let failed = |error: TryViaIrError| {
+            DFSqlLogicTestError::DataFusion(datafusion::error::DataFusionError::Execution(
+                error.to_string(),
+            ))
+        };
+        let (schema, batches) = if config.optd_enabled {
+            let planning = async {
+                let plan = state
+                    .create_logical_plan(sql)
+                    .await
+                    .map_err(|error| TryViaIrError::Failed(error.to_string()))?;
+                self.optimized_ir_with_history(&plan, history.as_deref_mut())
+                    .await
+            }
+            .await;
+            match planning {
+                Ok(plan) => {
+                    if let Some(history) = history.as_deref_mut() {
+                        history
+                            .finish(QueryStatus::Optimized, "optd_optimized", None)
+                            .await;
+                    }
+                    let (schema, batches, _) = self
+                        .execute_optimized_ir_with_mode(&plan, config.physical_planning)
+                        .await
+                        .map_err(failed)?;
+                    (schema, batches)
+                }
+                Err(TryViaIrError::Unsupported(reason)) => {
+                    if let Some(history) = history.as_deref_mut() {
+                        history
+                            .finish(QueryStatus::Bypassed, "unsupported_by_optd", Some(&reason))
+                            .await;
+                    }
                     self.execute_datafusion(sql).await?
                 }
-                Err(TryViaIrError::Failed(error)) => {
-                    return Err(DFSqlLogicTestError::DataFusion(
-                        datafusion::error::DataFusionError::Execution(error),
-                    ));
+                Err(error) => {
+                    if let Some(history) = history.as_deref_mut() {
+                        history
+                            .finish(
+                                QueryStatus::Failed,
+                                "planning_failed",
+                                Some(&error.to_string()),
+                            )
+                            .await;
+                    }
+                    return Err(failed(error));
                 }
             }
         } else {
+            if let Some(history) = history {
+                history
+                    .finish(QueryStatus::Bypassed, "optd_disabled", None)
+                    .await;
+            }
             self.execute_datafusion(sql).await?
         };
-
         if batches.is_empty() && schema.fields().is_empty() {
             Ok(RunnerOutput::StatementComplete)
         } else {
@@ -381,6 +494,7 @@ impl AsyncDB for OptdRunner {
 
 impl OptdRunner {
     /// Attempts SQL → optd IR → DataFusion execution.
+    #[cfg(test)]
     async fn try_via_ir(
         &self,
         sql: &str,
@@ -390,6 +504,7 @@ impl OptdRunner {
             .map(|(schema, batches, _)| (schema, batches))
     }
 
+    #[cfg(test)]
     async fn try_via_ir_with_path(
         &self,
         sql: &str,
@@ -419,6 +534,14 @@ impl OptdRunner {
         &self,
         plan: &LogicalPlan,
     ) -> Result<PlannedQuery, TryViaIrError> {
+        self.optimized_ir_with_history(plan, None).await
+    }
+
+    async fn optimized_ir_with_history(
+        &self,
+        plan: &LogicalPlan,
+        history: Option<&mut RequestHistory<'_>>,
+    ) -> Result<PlannedQuery, TryViaIrError> {
         // Writes/DDL must reach the shared executor even if cached statistics cannot
         // be read; do not attempt optimizer metadata construction for non-query plans.
         if !is_supported_relational_plan(plan) {
@@ -429,7 +552,7 @@ impl OptdRunner {
                 optimizer_context_from_logical_plan(&self.session, runtime_stats, plan).await?
             }
             StatisticsSource::Persistent { db, catalog_name } => {
-                let catalog = build_persistent_statistics_catalog(
+                let catalog = build_persistent_statistics_with_snapshot(
                     &self.session,
                     db.clone(),
                     catalog_name,
@@ -437,18 +560,35 @@ impl OptdRunner {
                 )
                 .await
                 .map_err(|error| TryViaIrError::Failed(error.to_string()))?;
-                optimizer_context_from_logical_plan_with_catalog(&self.session, plan, catalog)
-                    .await?
+                if let Some(history) = history {
+                    history.attach_snapshot(catalog.snapshot_id).await;
+                }
+                optimizer_context_from_logical_plan_with_catalog(
+                    &self.session,
+                    plan,
+                    catalog.catalog,
+                )
+                .await?
             }
         };
         optimize(opt).map_err(|e| TryViaIrError::Failed(e.to_string()))
     }
 
+    #[cfg(test)]
     async fn execute_optimized_ir(
         &self,
         opt: &PlannedQuery,
     ) -> Result<(SchemaRef, Vec<RecordBatch>, IrExecutionPath), TryViaIrError> {
-        if self.physical_planning_enabled() {
+        self.execute_optimized_ir_with_mode(opt, self.physical_planning_enabled())
+            .await
+    }
+
+    async fn execute_optimized_ir_with_mode(
+        &self,
+        opt: &PlannedQuery,
+        physical_planning: bool,
+    ) -> Result<(SchemaRef, Vec<RecordBatch>, IrExecutionPath), TryViaIrError> {
+        if physical_planning {
             match self.execute_physical_ir(opt).await {
                 Ok((schema, batches)) => {
                     return Ok((schema, batches, IrExecutionPath::Physical));
