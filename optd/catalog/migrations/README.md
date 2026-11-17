@@ -14,6 +14,8 @@ Executable SeaORM migrations live in `src/migration/` and currently create:
 - `optd_statistics_payload`
 - `optd_column_statistics`
 - `optd_adv_stats` (optional advanced objects)
+- `optd_query` (immutable SQL templates)
+- `optd_query_instance` (optimization requests)
 
 Temporal catalog entities use private auto-generated `row_id` primary keys for
 SeaORM persistence only; durable catalog identity remains in stable object IDs.
@@ -37,8 +39,12 @@ contents, and immutable relation/name/target/kind metadata. Unique indexes prote
 use the same atomic publication path; invalidation closes their active versions.
 See [advanced_statistics.md](../../../docs/advanced_statistics.md).
 
-The briefly proposed flattening migration was withdrawn before deployment; it is
-not part of the migration chain. Do not deploy an intermediate development binary.
+The fifth migration (`query_history`) adds the two non-temporal query-history tables
+and their indexes. Instances reference templates and optional planning snapshots;
+history writes do not advance metadata snapshots, schema versions or object counters.
+UUID identities are independent of catalog object allocation. Versioned JSON text
+keeps connector payloads backend-neutral. Existing metadata/statistics tables and
+frozen migrations are unchanged.
 
 Back up existing catalogs and stop all writers before upgrading. The single-history
 migration is transactional on SQLite and PostgreSQL and rejects ambiguous legacy

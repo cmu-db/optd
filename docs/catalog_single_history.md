@@ -77,7 +77,9 @@ optd_adv_stats(row_id PK, statistics_id, relation_id, statistics_name,
                value_encoding_version, contents TEXT, collected_at)
 ```
 
-Top-level IDs share `next_catalog_id`; columns retain relation-scoped identities. Names are not
+Top-level metadata object IDs share `next_catalog_id`; columns retain relation-scoped identities.
+Query templates and instances use independent UUIDs in non-temporal history tables;
+recording them does not publish a metadata snapshot or use this allocator. Names are not
 identities. Private persistence row keys are not planner handles. References and visible-name
 uniqueness are validated under the shared writer lock. Unique `(catalog_id, begin_snapshot)`
 and `(schema_id, begin_snapshot)` indexes additionally protect version identities. Ordinary

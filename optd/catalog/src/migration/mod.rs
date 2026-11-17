@@ -7,6 +7,7 @@ pub use sea_orm_migration::MigratorTrait;
 mod advanced_statistics;
 mod initial;
 mod legacy;
+mod query_history;
 mod single_history;
 mod statistics;
 
@@ -20,6 +21,7 @@ impl MigratorTrait for Migrator {
             Box::new(statistics::Migration),
             Box::new(single_history::Migration),
             Box::new(advanced_statistics::Migration),
+            Box::new(query_history::Migration),
         ]
     }
 }

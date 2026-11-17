@@ -5,6 +5,7 @@ pub mod from_df_logical;
 pub mod observed_execution;
 pub mod persistent_catalog;
 pub mod profiling;
+pub mod query_history;
 pub mod runner;
 pub mod runtime_statistics;
 pub mod setup;

@@ -127,6 +127,42 @@ atomically. Tests must cover compensation paths as catalog behavior expands.
   local PostgreSQL tests. The DataFusion provider compensation tests use SQLite;
   they do not establish distributed atomicity with external table storage.
 
+## Opt-in query history
+
+For a persistent-catalog runner, `with_query_history(QueryHistoryOptions::default())`
+enables SQL request history in the same metadata database. Existing constructors
+leave it disabled. The CLI equivalent is:
+
+```sh
+optd-cli --catalog-db catalog.sqlite --query-history --no-log-explain-steps \
+  -c 'SELECT * FROM numbers WHERE value = 2'
+```
+
+The normalizer parses an AST copy using DataFusion's dialect and parser limits.
+Version 1 extracts direct scalar comparison literals in WHERE/HAVING; it retains
+structural literals, casts, quoting, and unsupported expressions. Existing bind
+parameters and non-query statements do not receive a template in this version.
+The original SQL is planned and executed unchanged. Grouping is syntactic, not a
+semantic-equivalence guarantee or a plan-cache key.
+
+An instance records the snapshot actually read by the persistent statistics builder.
+Its `optimizer_configuration.statistics_catalog` records the runner's existing
+DataFusion catalog binding for cached statistics; it is diagnostic information,
+not a separate connection or configuration knob.
+It completes when optd optimization finishes, before execution: an optimized instance
+can have a subsequent execution error. Native fallback and optd-disabled requests
+are marked bypassed. History failures never replace source/query results or replay
+SQL. `execute_sql_with_history` returns per-call IDs and persistence acknowledgments;
+`execute_sql` remains a result-only convenience API. The CLI prints the instance ID
+and safe warnings when persistence needs attention.
+
+Template-only capture omits raw SQL, extracted values and planning-error text.
+Templates still contain identifiers and retained literals; this is not anonymization.
+`--capture-query-input` explicitly enables full input and planning-error capture.
+History database operations have deadlines; a timeout/crash can leave an unfinished
+or unacknowledged row. Explain helper calls, nested optimizer UDF calls, raw sessions,
+Substrait requests and execution feedback are not instrumented by this first version.
+
 ## Next integration steps
 
 1. Extend observation with trustworthy source transaction/commit notifications and

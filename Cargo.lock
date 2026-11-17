@@ -3418,9 +3418,11 @@ dependencies = [
  "sea-orm-migration",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "snafu",
  "tempfile",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

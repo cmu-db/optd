@@ -33,8 +33,27 @@ workspace, coverage and nightly jobs exclude the opt-in PostgreSQL tests; SQLite
 enabled there. For local PostgreSQL verification, point `OPTD_TEST_POSTGRES_URL` at a
 disposable local instance and run `cargo test -p optd-catalog --locked`.
 
-This is intentionally a narrow baseline, not the final schema. Query telemetry,
-the synchronous core adapter, and the old multi-crate structure were not ported.
+This is intentionally a narrow baseline, not the final schema. Full pass-level telemetry,
+the synchronous core adapter, and the old multi-crate structure remain outside this crate.
+
+## Query history
+
+`query_history::QueryHistoryStore` stores immutable SQL templates in `optd_query`
+and individual optimization requests in `optd_query_instance`. Requests use UUIDv7
+identifiers and may have no template when input cannot be normalized. Template
+fingerprints include normalization version, dialect, scope and parameter shape;
+canonical contents are checked before deduplication.
+
+History writes do not publish snapshots or consume catalog object IDs. An instance
+may reference the actual planning snapshot, then transition once from running to
+optimized, bypassed, failed or cancelled. Completion is idempotent; conflicting
+updates are rejected. Optimized does not imply successful query execution. Abrupt
+cancellation can leave an unfinished instance.
+
+Reads are bounded and use `(started_at, query_instance_id)` keyset cursors. JSON
+payloads are versioned and bounded; callers must apply a capture policy before
+passing potentially sensitive input. Execution feedback, candidate plans and
+append-only pass-event logs are separate follow-ups.
 
 ## Current architecture
 
@@ -42,6 +61,7 @@ the synchronous core adapter, and the old multi-crate structure were not ported.
 - `migration`: executable catalog migrations.
 - `snapshot`, `schema`, `relation`, `index`, and `statistics`: catalog operations.
 - `catalog`: transactional writes and snapshot-pinned reads.
+- `query_history`: non-temporal templates and optimization-request lifecycle records.
 
 The current model, DuckLake comparison, migration procedure, and limitations are documented in
 [`../../docs/catalog_single_history.md`](../../docs/catalog_single_history.md).
