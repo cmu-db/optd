@@ -16,6 +16,7 @@ sharing its IR property system.
 - direct base-column provenance through projections, renames, and aliases;
 - opaque definitions for computed values;
 - equality classes;
+- functional dependencies from provider-asserted unique keys and grouping semantics;
 - literal and numeric range constraints;
 - contradictions and residual predicates.
 
@@ -89,6 +90,32 @@ unchanged:
   its output;
 - a proven transformation may produce a sound derived profile but not masquerade as the original
   base-population sketch.
+
+## Functional dependencies and grouping
+
+`LogicalFacts::functional_dependencies` stores determinants and dependents as logical
+`ValueId` sets. Scan keys come only from provider-asserted `UniqueKey` constraints,
+never from observed NDV equaling row count. The existing catalog contract requires
+providers to validate enforcement and nullable-key semantics. Each scan's value
+identities keep self-join instances separate. An aggregation additionally establishes
+that its grouping tuple determines all its outputs, including aggregate values.
+
+Dependencies survive filtering, row duplication, limits, projection, rename, and
+direct aliases. Inner joins/cross products merge input dependencies; equality closure
+can connect determinants across an inner join. Semi/anti/mark joins preserve only
+left dependencies. Outer joins retain only preserved-side dependencies (none for a
+full outer join); nullable-side NULL extension is not assumed to preserve them.
+
+Grouping estimation removes a key only when the remaining keys' logical closure
+contains it. Deterministic elimination retains a representative in dependency cycles.
+The reduction changes neither query output columns nor grouping execution. It prevents
+multiplying dependent NDVs after filtering or joins: a declared key with 100 values,
+duplicated to 300 input rows, still has 100 groups when dependent attributes are added.
+This does not assert 300 distinct keys or reuse base-population sketches on derived
+rows. The PostgreSQL-style semi/anti row-selectivity policy remains unchanged.
+
+The closure/reduction implementation lives in `analysis/logical_facts/functional_dependencies.rs`
+and `analysis/grouping_dependencies.rs`, separate from the large estimator module.
 
 ## Expression-statistics transformations
 

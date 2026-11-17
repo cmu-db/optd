@@ -14,6 +14,7 @@ use crate::{
     UnaryOp,
 };
 
+mod grouping_dependencies;
 mod logical_facts;
 pub mod observability;
 mod sample_cardinality;
@@ -27,7 +28,7 @@ mod statistics_transform;
 
 pub use logical_facts::{
     BaseColumn, ConstraintSet, LogicalFacts, LogicalFactsAnalysis, ValueEquivalenceClasses,
-    ValueId, ValueRange,
+    ValueFunctionalDependency, ValueId, ValueRange,
 };
 
 /// Result type used by query analyses.
@@ -2329,9 +2330,11 @@ fn aggregation_profile(
         // SQL scalar aggregation emits exactly one row even for an empty input.
         Estimate::exact(1.0)
     } else {
+        // Estimate independent value domains, but preserve every requested output key.
+        let grouping_keys =
+            grouping_dependencies::independent_grouping_keys(&data.keys, input_facts, ctx);
         let mut seen_values = BTreeSet::new();
-        let grouping_values = data
-            .keys
+        let grouping_values = grouping_keys
             .iter()
             .filter_map(|expr| match expr.get(ctx) {
                 ExprData::ColumnRef(column) => input_facts.canonical_value_for_column(*column),
@@ -2360,7 +2363,7 @@ fn aggregation_profile(
                 |joint| joint.distinct.clone(),
             )
         };
-        let product = data.keys.iter().fold(initial, |acc, expr| {
+        let product = grouping_keys.iter().fold(initial, |acc, expr| {
             let distinct = if let ExprData::ColumnRef(column) = expr.get(ctx) {
                 if let Some(value) = input_facts.canonical_value_for_column(*column) {
                     if covered_values.contains(&value) || !seen_values.contains(&value) {
@@ -2390,8 +2393,8 @@ fn aggregation_profile(
         });
         let fully_covered =
             selected_joint.is_some_and(|joint| grouping_values.is_subset(&joint.values));
-        let scbc = (!unique_grouping && !fully_covered)
-            .then(|| grouping_scbc(input, &data.keys, ctx, sample?))
+        let scbc = (!unique_grouping && !fully_covered && grouping_keys.len() >= 2)
+            .then(|| grouping_scbc(input, &grouping_keys, ctx, sample?))
             .flatten()
             .map(|mut estimate| {
                 // A partial joint constrains the full tuple from below, but must not force

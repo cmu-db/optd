@@ -20,8 +20,8 @@ pub use analysis::{
     CreatedColumns, Estimate, EstimateSource, FreeColumns, LogicalFacts, LogicalFactsAnalysis,
     ObservationContext, ObservationMetadata, ObservationMode, ObservationPayload,
     ObservationRecord, ObservationScope, ObservationScopeKind, ObservationScopeStatus,
-    ObservationSession, ParentIndex, ParentsOf, UsedColumns, ValueEquivalenceClasses, ValueId,
-    ValueRange, expr_used_columns,
+    ObservationSession, ParentIndex, ParentsOf, UsedColumns, ValueEquivalenceClasses,
+    ValueFunctionalDependency, ValueId, ValueRange, expr_used_columns,
 };
 pub use catalog::{
     BoundedVec, CardinalityStatistics, Catalog, CatalogError, CatalogResult, CollectionTooLarge,

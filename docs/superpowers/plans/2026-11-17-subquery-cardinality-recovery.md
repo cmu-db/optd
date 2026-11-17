@@ -39,7 +39,8 @@ No new q-error or latency claim is made for this phase.
 
 The separate literature comparison is recorded in
 [`2026-11-17-fent-aggregate-estimation-vs-lpbound.md`](../../investigations/2026-11-17-fent-aggregate-estimation-vs-lpbound.md).
-Phases 1b–4 below remain planned, not implemented by this checkpoint.
+Phase 1b, the remaining Phase 2 domain work, and Phases 3–4 remain planned.
+The functional-dependency slice of Phase 2 is implemented and validated below.
 
 ## Phase 1 — Preserve filter-context semi/anti semantics (implemented)
 
@@ -75,6 +76,39 @@ when their values remain observable. This requires dedicated parent/liveness tes
 it is not needed to prevent the q18 producer from manufacturing marks.
 
 ## Phase 2 — Propagate surviving key domains and grouping dependencies
+
+Checkpoint baseline: Phase 1 is committed as `d56bb72`, on top of `cbb9b15`'s
+PostgreSQL-style semi/anti policy. That newer policy intentionally avoids deriving
+matched/complementary key domains from semi/anti selectivity. Preserve it: do not
+reinstate the former coverage/fanout or HLL-intersection policy as part of this work.
+The first Phase 2 slice instead tracks logical functional dependencies from
+provider-asserted unique keys (per scan instance) and aggregation grouping keys.
+Dependencies survive subsets/duplicates and safe aliases but are dropped from
+null-supplying outer-join sides. Group estimation can then remove FD-dependent
+keys without changing emitted columns or join-row selectivity. Observed NDV equal
+to row count is not a key proof. Nullable-key semantics remain the catalog
+provider's responsibility under the existing `UniqueKey` contract.
+
+### Phase 2a checkpoint — logical dependencies implemented
+
+- Added `ValueFunctionalDependency` and equality-aware transitive closure to logical
+  facts. Only declared catalog keys and grouping semantics create dependencies.
+- Added estimator-only grouping-key reduction in `analysis/grouping_dependencies.rs`;
+  output columns and PostgreSQL-style semi/anti selectivity are unchanged.
+- The new before/after regression changes a declared-key grouping estimate from
+  300 to 100 after threefold duplication; the undeclared-key control stays at 300.
+- Safety tests cover composite determinants, partial scan keys, self-join instances,
+  filter/projection/rename/direct-alias propagation, inner equality, outer/single
+  joins, aggregation outputs, cyclic/transitive dependencies and old serialized facts.
+- Verification: 297 core tests, 284 without default features, 22 release TPC-H result
+  SLTs, 18 release feature SLTs, and workspace Clippy all pass. Changed analysis
+  modules pass rustfmt; existing unrelated workspace formatting differences remain.
+- Limitation: catalog key dependencies require provider-asserted metadata. The runtime
+  collector does not infer keys from measured uniqueness, so no q18 gain is claimed
+  without verifying the necessary key metadata actually reaches the estimator.
+- No new q-error or controlled query-runtime benchmark was run for this checkpoint.
+
+### Remaining Phase 2 work
 
 1. Audit semi-join key coverage and equality-class NDVs before introducing new
    metadata. A semi join restricts the join-key *domain*, not just independent rows.

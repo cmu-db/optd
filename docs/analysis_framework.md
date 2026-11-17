@@ -124,8 +124,10 @@ Each analysis owns its caching. The framework does not mandate or provide a cach
 Under the append-only invariant, bottom-up cache entries for existing handles are always
 valid. Top-down cache entries are valid until the reachable root changes.
 
-`LogicalFactsAnalysis` keeps estimator-independent value lineage and predicate constraints separate
-from cardinality policy. `CardinalityEstimationV1` consumes those facts, catalog key relationships,
+`LogicalFactsAnalysis` keeps estimator-independent value lineage, predicate constraints, and proven
+functional dependencies separate from cardinality policy. Dependencies come from provider-asserted
+scan keys or grouping semantics, not measured NDV. The dependency closure normalizes equality
+classes and preserves scan-instance identity; outer joins drop null-supplying-side dependencies. `CardinalityEstimationV1` consumes those facts, catalog key relationships,
 and query-local base-column sketches. Pair selectivity, directional join-key coverage, and filtered
 NDV propagation remain estimator policy rather than logical facts. See
 [`statistics_architecture.md`](statistics_architecture.md) for the ownership and propagation

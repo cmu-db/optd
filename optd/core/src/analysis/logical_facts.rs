@@ -12,6 +12,9 @@ use super::{
     OperatorAnalysisState, typed_analysis,
 };
 
+mod functional_dependencies;
+pub use functional_dependencies::ValueFunctionalDependency;
+
 /// Stable identity of a base-table value within one query.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -292,6 +295,9 @@ pub struct LogicalFacts {
     /// Opaque definitions for [`ValueId::Derived`] outputs. No statistics semantics are attached.
     pub definitions: BTreeMap<Column, Expr>,
     pub constraints: ConstraintSet,
+    /// Proven value dependencies, never inferred solely from observed NDV or row counts.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub functional_dependencies: Vec<ValueFunctionalDependency>,
 }
 
 impl LogicalFacts {
@@ -462,8 +468,11 @@ fn derive_logical_facts(
                     )
                 })
                 .collect();
+            let functional_dependencies =
+                functional_dependencies::scan_dependencies(scan, &lineage, analyses);
             LogicalFacts {
                 lineage,
+                functional_dependencies,
                 ..LogicalFacts::default()
             }
         }
@@ -504,12 +513,14 @@ fn derive_logical_facts(
                 lineage,
                 definitions,
                 constraints: input.constraints.clone(),
+                functional_dependencies: input.functional_dependencies.clone(),
             }
         }
         OperatorData::Rename(rename) => {
             let input = LogicalFactsAnalysis::get_shared(ctx, analyses, rename.input)?;
             let mut facts = LogicalFacts {
                 constraints: input.constraints.clone(),
+                functional_dependencies: input.functional_dependencies.clone(),
                 ..LogicalFacts::default()
             };
             for (renamed, original) in &rename.defs {
@@ -553,9 +564,15 @@ fn derive_logical_facts(
                     facts.lineage.insert(*column, value.clone());
                 }
             }
+            let grouping_values = facts.lineage.values().cloned().collect();
             for (column, _) in &aggregation.aggregates {
                 facts.lineage.insert(*column, ValueId::Derived(*column));
             }
+            facts.functional_dependencies = functional_dependencies::aggregation_dependencies(
+                &input,
+                &grouping_values,
+                &facts.lineage,
+            );
             facts
         }
         OperatorData::Sort(sort) => LogicalFactsAnalysis::get_shared(ctx, analyses, sort.input)?
@@ -593,11 +610,13 @@ fn derive_logical_facts(
                 JoinType::RightOuter => {
                     let mut facts = merge_inputs(&left, &right, false);
                     facts.constraints = right.constraints.clone();
+                    facts.functional_dependencies = right.functional_dependencies.clone();
                     facts
                 }
                 JoinType::FullOuter => {
                     let mut facts = merge_inputs(&left, &right, false);
                     facts.constraints = ConstraintSet::default();
+                    facts.functional_dependencies.clear();
                     facts
                 }
             }
@@ -626,7 +645,14 @@ fn merge_inputs(
     facts.definitions.extend(right.definitions.clone());
     if merge_constraints {
         facts.constraints.merge_from(&right.constraints);
+        facts
+            .functional_dependencies
+            .extend(right.functional_dependencies.iter().cloned());
+        facts.functional_dependencies.sort();
+        facts.functional_dependencies.dedup();
     }
+    // When constraints cannot be merged (LEFT/SINGLE joins), only preserved-side
+    // dependencies survive. NULL extension can invalidate nullable-side determinants.
     facts
 }
 

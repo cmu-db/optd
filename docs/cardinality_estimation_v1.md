@@ -95,7 +95,13 @@ ordered comparisons proportionally restrict NDV while tightening bounds (includi
 predecessor/successor bounds). Other columns use a uniform occupancy estimate for surviving NDV
 instead of only capping the old NDV by output rows.
 
-`Aggregation` estimates group count from grouping-key distinct counts, capped by input rows.
+`Aggregation` first reduces estimation keys by proven functional dependencies, while retaining
+all requested output columns. Provider-asserted scan keys and aggregation grouping tuples provide
+dependencies; equality closure propagates them through inner joins and aliases. Observed NDV alone
+is not a proof, self-join instances remain separate, and null-supplying outer-join sides lose their
+dependencies. This prevents dependent attributes from inflating grouping estimates after filters
+or row-duplicating joins. Only independent keys participate in joint-NDV/product/SCBC estimation;
+SCBC requires at least two remaining keys. Group count remains capped by input rows.
 Semantic uniqueness wins first. Otherwise, the estimator uses the largest compatible joint NDV once
 and multiplies single-column NDVs only for uncovered keys. Without a fully covering joint NDV,
 multi-key grouping first tries sketch-corrected bound-corrected (SCBC) NDV estimation using tuple
