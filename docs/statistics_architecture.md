@@ -159,8 +159,13 @@ Equality estimation separates two quantities:
   PostgreSQL 17's `eqjoinsel_semi` policy rather than a custom match-probability model.
 
 Semi/anti equality uses matched left MCV frequencies plus NDV-ratio estimation of the uncertain
-non-null remainder. Default NDVs use 0.5; only the right NDV is additionally capped by right rows.
-Each equality is capped by `right_rows * inner_pair_selectivity`, and conjuncts multiply directly.
+non-null remainder. Direct base values recover their original catalog variable NDV before this
+calculation; shrinking the left NDV with input filters would double-count left selectivity and can
+incorrectly eliminate an anti join. Default NDVs use 0.5; only the right variable NDV is additionally
+capped by right rows. Missing base statistics and computed values fall back to the current profile.
+This is estimator-local: it neither restores invalidated sketches nor changes filtered column NDVs,
+inner-pair estimation, or grouping. Each equality is capped by
+`right_rows * inner_pair_selectivity`, and conjuncts multiply directly.
 There is no residual-fanout exponent or SpaceSaving coverage floor. See
 [the estimator documentation](cardinality_estimation_v1.md#join-estimation) for the source reference,
 NULL-safe adaptation, and retained independence assumptions.

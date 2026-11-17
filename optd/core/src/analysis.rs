@@ -24,6 +24,8 @@ pub use observability::{
     ObservationRecord, ObservationScope, ObservationScopeKind, ObservationScopeStatus,
     ObservationSession,
 };
+#[cfg(test)]
+mod semi_anti_tests;
 mod statistics_transform;
 
 pub use logical_facts::{
@@ -3402,10 +3404,8 @@ fn equality_semi_selectivity(
         return left_non_null.min(inner_cap);
     }
 
-    let mut left_ndv = effective_join_distinct(left, left_profile, left_base, catalog);
-    let mut right_ndv = effective_join_distinct(right, right_profile, right_base, catalog);
-    let left_default = left_profile.distinct.source == EstimateSource::Default;
-    let mut right_default = right_profile.distinct.source == EstimateSource::Default;
+    let (mut left_ndv, left_default) = semi_join_variable_ndv(left, left_profile, catalog);
+    let (mut right_ndv, mut right_default) = semi_join_variable_ndv(right, right_profile, catalog);
     if right_ndv >= right.rows.value {
         right_ndv = right.rows.value;
         right_default = false;
@@ -3445,6 +3445,53 @@ fn equality_semi_selectivity(
     let selectivity =
         matched_mass + uncertain_fraction * (left_non_null - matched_mass) + null_selectivity;
     selectivity.clamp(0.0, 1.0).min(inner_cap)
+}
+
+/// PostgreSQL estimates a variable's domain before input restrictions, then caps only the RHS
+/// by current input rows. Reusing a thinned LHS NDV would double-count its filter selectivity.
+/// Keep this lookup local: inner joins, grouping, and column profiles need their adjusted NDVs.
+fn semi_join_variable_ndv(
+    relation: &CardinalityProfile,
+    profile: &ColumnProfile,
+    catalog: Option<&dyn Catalog>,
+) -> (f64, bool) {
+    let original = (|| {
+        let base = base_column(profile)?;
+        let catalog = catalog?;
+        let statistics = catalog.table_by_ref(&base.table).ok()?.statistics?;
+        let column = statistics.column_statistics.get(&base.name);
+        let population = column
+            .and_then(|column| column.frequency)
+            .or(statistics.row_count);
+        let unique = statistics
+            .constraints
+            .unique_keys
+            .iter()
+            .any(|key| key.columns() == [base.name.as_str()]);
+        let distinct = if unique {
+            population? as f64
+        } else {
+            let column = column?;
+            column.distinct.map(|value| value as f64).or_else(|| {
+                column
+                    .sketches
+                    .as_ref()?
+                    .distinct_values
+                    .as_ref()
+                    .map(|hll| hll.estimate())
+            })?
+        };
+        Some(distinct.min(population.map_or(f64::INFINITY, |rows| rows as f64)))
+    })();
+    original.map_or_else(
+        || {
+            (
+                effective_join_distinct(relation, profile, base_column(profile), catalog),
+                profile.distinct.source == EstimateSource::Default,
+            )
+        },
+        |distinct| (distinct, false),
+    )
 }
 
 /// Do not interpret a base distribution retained as a post-join proxy as current MCV mass.
@@ -5409,9 +5456,9 @@ mod tests {
     use crate::{
         AggregateExpr, AggregateFunction, Aggregation, BinaryOp, CardinalityStatistics, Catalog,
         ColumnData, ColumnGroupSource, ColumnGroupStatistics, ColumnSet, ColumnStatistics,
-        ExprData, ForeignKey, Join, JoinType, Limit, Map, MemoryCatalog, OperatorData, Output,
-        Projection, ScalarFunction, ScalarValue, Scan, Selection, TableFunction, TableFunctionDef,
-        TableRef, TableStatistics, UniqueKey,
+        ExprData, Join, JoinType, Limit, Map, MemoryCatalog, OperatorData, Output, Projection,
+        ScalarFunction, ScalarValue, Scan, Selection, TableFunction, TableFunctionDef, TableRef,
+        TableStatistics,
     };
     use arrow_schema::{DataType, Field, Schema};
     use std::sync::Arc;
@@ -9053,411 +9100,6 @@ mod tests {
         assert_eq!(selectivity.value, 0.001);
     }
 
-    fn postgres_semi_test_profile(column: Column, values: &[i64]) -> CardinalityProfile {
-        let mut counts = BTreeMap::<i64, usize>::new();
-        let mut sketches = ColumnSketches::new(values.len() as u64)
-            .space_saving(128)
-            .unwrap();
-        for &value in values {
-            *counts.entry(value).or_default() += 1;
-            sketches.observe(&ScalarValue::Int64(value));
-        }
-        let mut profile = test_column_profile(values.len() as f64, counts.len() as f64);
-        profile.sketches = Some(Arc::new(sketches));
-        profile.distribution = Some(Arc::new(crate::ColumnDistributionStatistics {
-            null_count: None,
-            most_common_values: Some(
-                crate::MostCommonValues::try_new(
-                    counts
-                        .into_iter()
-                        .map(|(value, frequency)| crate::MostCommonValue {
-                            value: ScalarValue::Int64(value),
-                            frequency,
-                        })
-                        .collect(),
-                    crate::StatisticsCompleteness::Complete,
-                    crate::StatisticsProvenance::FullScan,
-                )
-                .unwrap(),
-            ),
-            histogram: None,
-        }));
-        CardinalityProfile::new(
-            Estimate::exact(values.len() as f64),
-            [(column, profile)].into_iter().collect(),
-        )
-    }
-
-    #[test]
-    fn postgres_semi_selectivity_respects_known_mcv_mass() {
-        let mut ctx = QueryContext::new();
-        let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
-        let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
-        let predicate = equality_expr(&mut ctx, left_key, right_key);
-        let mut values = vec![1];
-        values.extend(std::iter::repeat_n(2, 901));
-        values.extend(3..=100);
-        let left = postgres_semi_test_profile(left_key, &values);
-        let right = postgres_semi_test_profile(right_key, &[1]);
-        let inner = join_profile_from_predicate(&left, &right, JoinType::Inner, predicate, &ctx);
-        let semi = join_profile_from_predicate(&left, &right, JoinType::LeftSemi, predicate, &ctx);
-        let anti = join_profile_from_predicate(&left, &right, JoinType::LeftAnti, predicate, &ctx);
-        assert_eq!(inner.rows.value, 1.0);
-        assert_eq!(semi.rows.value, 1.0);
-        assert_eq!(anti.rows.value, 999.0);
-        assert!(semi.rows.value <= inner.rows.value);
-    }
-
-    #[test]
-    fn postgres_semi_selectivity_multiplies_residual_without_fanout() {
-        let mut ctx = QueryContext::new();
-        let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
-        let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
-        let equality = equality_expr(&mut ctx, left_key, right_key);
-        let left_ref = ExprData::ColumnRef(left_key).add(&mut ctx);
-        let literal = ExprData::Literal(ScalarValue::Int64(500)).add(&mut ctx);
-        let residual = ExprData::Binary {
-            op: BinaryOp::Gt,
-            left: left_ref,
-            right: literal,
-        }
-        .add(&mut ctx);
-        let left = CardinalityProfile::new(
-            Estimate::exact(1_000.0),
-            [(left_key, test_column_profile(1_000.0, 1_000.0))]
-                .into_iter()
-                .collect(),
-        );
-        let right = CardinalityProfile::new(
-            Estimate::exact(100_000.0),
-            [(right_key, test_column_profile(100_000.0, 1_000.0))]
-                .into_iter()
-                .collect(),
-        );
-        let semi = join_profile_from_conjuncts(
-            &left,
-            &right,
-            JoinType::LeftSemi,
-            &[equality, residual],
-            &ctx,
-        );
-        let anti = join_profile_from_conjuncts(
-            &left,
-            &right,
-            JoinType::LeftAnti,
-            &[equality, residual],
-            &ctx,
-        );
-        let expected = 1_000.0 * CardinalityEstimationConfig::default().range_fallback_selectivity;
-        assert!((semi.rows.value - expected).abs() < 1e-9);
-        assert!((semi.rows.value + anti.rows.value - 1_000.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn postgres_semi_selectivity_defaults_to_half_for_unknown_ndvs() {
-        let mut ctx = QueryContext::new();
-        let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
-        let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
-        let predicate = equality_expr(&mut ctx, left_key, right_key);
-        let profile = |column| {
-            let mut key = test_column_profile(1_000.0, 100.0);
-            key.distinct = Estimate::default(100.0);
-            CardinalityProfile::new(
-                Estimate::exact(1_000.0),
-                [(column, key)].into_iter().collect(),
-            )
-        };
-        let semi = join_profile_from_predicate(
-            &profile(left_key),
-            &profile(right_key),
-            JoinType::LeftSemi,
-            predicate,
-            &ctx,
-        );
-        assert_eq!(semi.rows.value, 500.0);
-    }
-
-    #[test]
-    fn postgres_semi_selectivity_uses_partial_mcv_mass_and_uncertain_remainder() {
-        let mut ctx = QueryContext::new();
-        let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
-        let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
-        let predicate = equality_expr(&mut ctx, left_key, right_key);
-        let reversed = equality_expr(&mut ctx, right_key, left_key);
-        let profile = |column, rows, ndv, entries: &[(i64, usize)]| {
-            let mut key = test_column_profile(rows, ndv);
-            key.distribution = Some(Arc::new(crate::ColumnDistributionStatistics {
-                null_count: None,
-                most_common_values: Some(
-                    crate::MostCommonValues::try_new(
-                        entries
-                            .iter()
-                            .map(|&(value, frequency)| crate::MostCommonValue {
-                                value: ScalarValue::Int64(value),
-                                frequency,
-                            })
-                            .collect(),
-                        crate::StatisticsCompleteness::Partial,
-                        crate::StatisticsProvenance::Catalog,
-                    )
-                    .unwrap(),
-                ),
-                histogram: None,
-            }));
-            CardinalityProfile::new(
-                Estimate::catalog(rows),
-                [(column, key)].into_iter().collect(),
-            )
-        };
-        let mut left = profile(left_key, 1_000.0, 100.0, &[(1, 200), (2, 300)]);
-        let mut right = profile(right_key, 10_000.0, 10.0, &[(1, 1_000), (3, 2_000)]);
-        left.columns.get_mut(&left_key).unwrap().frequency = Estimate::exact(800.0);
-        for on in [predicate, reversed] {
-            let semi = join_profile_from_predicate(&left, &right, JoinType::LeftSemi, on, &ctx);
-            // Known mass 0.2; uncertain non-null mass 0.6; remaining NDVs are 99 and 9.
-            assert!((semi.rows.value - 1_000.0 * (0.2 + 0.6 * 9.0 / 99.0)).abs() < 1e-9);
-        }
-        left.columns.get_mut(&left_key).unwrap().distinct = Estimate::default(100.0);
-        let semi = join_profile_from_predicate(&left, &right, JoinType::LeftSemi, predicate, &ctx);
-        assert!((semi.rows.value - 500.0).abs() < 1e-9);
-
-        // Without both lists, PostgreSQL uses the NDV fallback, not one-sided MCV mass.
-        left.columns.get_mut(&left_key).unwrap().distinct = Estimate::exact(100.0);
-        right.columns.get_mut(&right_key).unwrap().distribution = None;
-        let semi = join_profile_from_predicate(&left, &right, JoinType::LeftSemi, predicate, &ctx);
-        assert!((semi.rows.value - 80.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn postgres_semi_selectivity_clamps_only_rhs_ndv_and_caps_by_inner_rows() {
-        let mut ctx = QueryContext::new();
-        let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
-        let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
-        let predicate = equality_expr(&mut ctx, left_key, right_key);
-        let mut left = CardinalityProfile::new(
-            Estimate::exact(10.0),
-            [(left_key, test_column_profile(10.0, 100.0))]
-                .into_iter()
-                .collect(),
-        );
-        let mut right = CardinalityProfile::new(
-            Estimate::exact(10.0),
-            [(right_key, test_column_profile(10.0, 100.0))]
-                .into_iter()
-                .collect(),
-        );
-        right.columns.get_mut(&right_key).unwrap().distinct = Estimate::default(100.0);
-        let semi = join_profile_from_predicate(&left, &right, JoinType::LeftSemi, predicate, &ctx);
-        // RHS cap makes its default NDV usable; LHS is not capped again in eqjoinsel_semi.
-        assert_eq!(semi.rows.value, 1.0);
-
-        left.rows = Estimate::exact(1_000.0);
-        left.columns.get_mut(&left_key).unwrap().frequency = Estimate::exact(1_000.0);
-        left.columns.get_mut(&left_key).unwrap().distinct = Estimate::default(1_000.0);
-        right.rows = Estimate::exact(1.0);
-        right.columns.get_mut(&right_key).unwrap().frequency = Estimate::exact(1.0);
-        right.columns.get_mut(&right_key).unwrap().distinct = Estimate::exact(1.0);
-        let semi = join_profile_from_predicate(&left, &right, JoinType::LeftSemi, predicate, &ctx);
-        let inner = join_profile_from_predicate(&left, &right, JoinType::Inner, predicate, &ctx);
-        // The 0.5 default must not exceed the one expected inner pair.
-        assert_eq!(semi.rows.value, 1.0);
-        assert_eq!(inner.rows.value, 1.0);
-    }
-
-    #[test]
-    fn postgres_semi_selectivity_handles_empty_and_null_only_inputs() {
-        let mut ctx = QueryContext::new();
-        let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
-        let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
-        let ordinary = equality_expr(&mut ctx, left_key, right_key);
-        let left_ref = ExprData::ColumnRef(left_key).add(&mut ctx);
-        let right_ref = ExprData::ColumnRef(right_key).add(&mut ctx);
-        let null_safe = ExprData::Binary {
-            op: BinaryOp::IsNotDistinctFrom,
-            left: left_ref,
-            right: right_ref,
-        }
-        .add(&mut ctx);
-        let mut left_column = test_column_profile(100.0, 10.0);
-        left_column.frequency = Estimate::exact(50.0);
-        let left = CardinalityProfile::new(
-            Estimate::exact(100.0),
-            [(left_key, left_column)].into_iter().collect(),
-        );
-        let mut right_column = test_column_profile(10.0, 0.0);
-        right_column.frequency = Estimate::exact(0.0);
-        let mut right = CardinalityProfile::new(
-            Estimate::exact(10.0),
-            [(right_key, right_column)].into_iter().collect(),
-        );
-        for (on, expected) in [(ordinary, 0.0), (null_safe, 50.0)] {
-            let semi = join_profile_from_predicate(&left, &right, JoinType::LeftSemi, on, &ctx);
-            let anti = join_profile_from_predicate(&left, &right, JoinType::LeftAnti, on, &ctx);
-            assert_eq!(semi.rows.value, expected);
-            assert_eq!(anti.rows.value, 100.0 - expected);
-        }
-        right.rows = Estimate::exact(0.0);
-        for on in [ordinary, null_safe] {
-            let semi = join_profile_from_predicate(&left, &right, JoinType::LeftSemi, on, &ctx);
-            let anti = join_profile_from_predicate(&left, &right, JoinType::LeftAnti, on, &ctx);
-            assert_eq!(semi.rows.value, 0.0);
-            assert_eq!(anti.rows.value, 100.0);
-        }
-        let empty = left.cap_by_rows(Estimate::exact(0.0));
-        right.rows = Estimate::exact(10.0);
-        for join_type in [JoinType::LeftSemi, JoinType::LeftAnti] {
-            let result = join_profile_from_predicate(&empty, &right, join_type, null_safe, &ctx);
-            assert_eq!(result.rows.value, 0.0);
-        }
-    }
-
-    #[test]
-    fn postgres_semi_selectivity_does_not_use_post_join_mcv_proxies() {
-        let mut ctx = QueryContext::new();
-        let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
-        let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
-        let predicate = equality_expr(&mut ctx, left_key, right_key);
-        let mut values = vec![1];
-        values.extend(std::iter::repeat_n(2, 901));
-        values.extend(3..=100);
-        let mut left = postgres_semi_test_profile(left_key, &values);
-        let right = postgres_semi_test_profile(right_key, &[1]);
-        left.rows.source = EstimateSource::Derived;
-        left.columns.get_mut(&left_key).unwrap().sketches = None;
-        assert!(semi_join_mcv(&left, &left.columns[&left_key]).is_none());
-        let semi = join_profile_from_predicate(&left, &right, JoinType::LeftSemi, predicate, &ctx);
-        assert_eq!(semi.rows.value, 10.0);
-    }
-
-    #[test]
-    fn cardinality_estimation_uses_postgres_selectivity_for_semi_and_anti() {
-        let mut ctx = QueryContext::new();
-        let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
-        let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
-        let left_scan = OperatorData::Scan(Scan {
-            table: TableRef::bare("left_t"),
-            columns: vec![left_key],
-        })
-        .add(&mut ctx);
-        let right_scan = OperatorData::Scan(Scan {
-            table: TableRef::bare("right_t"),
-            columns: vec![right_key],
-        })
-        .add(&mut ctx);
-        let on = equality_expr(&mut ctx, left_key, right_key);
-        let semi = OperatorData::Join(Join {
-            join_type: JoinType::LeftSemi,
-            on,
-            outer: left_scan,
-            inner: right_scan,
-        })
-        .add(&mut ctx);
-        let on = equality_expr(&mut ctx, left_key, right_key);
-        let anti = OperatorData::Join(Join {
-            join_type: JoinType::LeftAnti,
-            on,
-            outer: left_scan,
-            inner: right_scan,
-        })
-        .add(&mut ctx);
-
-        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
-        catalog
-            .create_table(TableRef::bare("left_t"), schema(), None)
-            .unwrap();
-        catalog
-            .create_table(TableRef::bare("right_t"), schema(), None)
-            .unwrap();
-        let left_values = (1..=1_000).map(Some).collect::<Vec<_>>();
-        let right_values = (1..=100).map(Some).collect::<Vec<_>>();
-        catalog
-            .set_table_statistics(
-                TableRef::bare("left_t"),
-                table_stats_from_i64_values("left_key", &left_values),
-            )
-            .unwrap();
-        catalog
-            .set_table_statistics(
-                TableRef::bare("right_t"),
-                table_stats_from_i64_values("right_key", &right_values),
-            )
-            .unwrap();
-        let mut analyses = AnalysisContext::new(catalog);
-
-        assert_eq!(
-            analyses
-                .get::<CardinalityEstimationV1>(&ctx, semi)
-                .unwrap()
-                .rows
-                .value,
-            100.0
-        );
-        assert_eq!(
-            analyses
-                .get::<CardinalityEstimationV1>(&ctx, anti)
-                .unwrap()
-                .rows
-                .value,
-            900.0
-        );
-    }
-
-    #[test]
-    fn semi_join_coverage_is_invariant_to_right_duplicates() {
-        fn estimate(right_values: &[Option<i64>]) -> f64 {
-            let mut ctx = QueryContext::new();
-            let left_key = ColumnData::new("key", DataType::Int64).add(&mut ctx);
-            let right_key = ColumnData::new("key", DataType::Int64).add(&mut ctx);
-            let left_scan = OperatorData::Scan(Scan {
-                table: TableRef::bare("left_t"),
-                columns: vec![left_key],
-            })
-            .add(&mut ctx);
-            let right_scan = OperatorData::Scan(Scan {
-                table: TableRef::bare("right_t"),
-                columns: vec![right_key],
-            })
-            .add(&mut ctx);
-            let on = equality_expr(&mut ctx, left_key, right_key);
-            let semi = OperatorData::Join(Join {
-                join_type: JoinType::LeftSemi,
-                on,
-                outer: left_scan,
-                inner: right_scan,
-            })
-            .add(&mut ctx);
-
-            let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
-            let key_schema = Arc::new(Schema::new(vec![Field::new("key", DataType::Int64, false)]));
-            for table in ["left_t", "right_t"] {
-                catalog
-                    .create_table(TableRef::bare(table), key_schema.clone(), None)
-                    .unwrap();
-            }
-            let left_values = (1..=1_000).map(Some).collect::<Vec<_>>();
-            catalog
-                .set_table_statistics(
-                    TableRef::bare("left_t"),
-                    table_stats_from_i64_values("key", &left_values),
-                )
-                .unwrap();
-            catalog
-                .set_table_statistics(
-                    TableRef::bare("right_t"),
-                    table_stats_from_i64_values("key", right_values),
-                )
-                .unwrap();
-            AnalysisContext::new(catalog)
-                .get::<CardinalityEstimationV1>(&ctx, semi)
-                .unwrap()
-                .rows
-                .value
-        }
-
-        assert_eq!(estimate(&[Some(1)]), 1.0);
-        assert_eq!(estimate(&vec![Some(1); 1_000]), 1.0);
-    }
-
     #[test]
     fn ordered_range_overlap_controls_join_domain_intersection() {
         let mut ctx = QueryContext::new();
@@ -9781,200 +9423,6 @@ mod tests {
     }
 
     #[test]
-    fn semi_and_anti_profiles_use_row_thinning_without_inferred_key_domains() {
-        let mut ctx = QueryContext::new();
-        let left_key = ColumnData::new("left_key", DataType::Int64).add(&mut ctx);
-        let right_key = ColumnData::new("right_key", DataType::Int64).add(&mut ctx);
-        let predicate = equality_expr(&mut ctx, left_key, right_key);
-        let left = CardinalityProfile::new(
-            Estimate::exact(1_000.0),
-            [(left_key, test_column_profile(1_000.0, 100.0))]
-                .into_iter()
-                .collect(),
-        );
-        let right = CardinalityProfile::new(
-            Estimate::exact(100.0),
-            [(right_key, test_column_profile(100.0, 10.0))]
-                .into_iter()
-                .collect(),
-        );
-
-        let semi =
-            join_profile_from_conjuncts(&left, &right, JoinType::LeftSemi, &[predicate], &ctx);
-        assert_eq!(semi.rows.value, 100.0);
-        assert_eq!(semi.columns[&left_key].frequency.value, 100.0);
-        assert_eq!(
-            semi.columns[&left_key].distinct,
-            surviving_distinct_after_row_filter(&left.columns[&left_key], 0.1, 100.0),
-        );
-
-        let anti =
-            join_profile_from_conjuncts(&left, &right, JoinType::LeftAnti, &[predicate], &ctx);
-        assert_eq!(anti.rows.value, 900.0);
-        assert_eq!(anti.columns[&left_key].frequency.value, 900.0);
-        assert_eq!(
-            anti.columns[&left_key].distinct,
-            surviving_distinct_after_row_filter(&left.columns[&left_key], 0.9, 900.0),
-        );
-
-        let mut nullable_left_key = test_column_profile(100.0, 10.0);
-        nullable_left_key.frequency = Estimate::exact(50.0);
-        let nullable_left = CardinalityProfile::new(
-            Estimate::exact(100.0),
-            [(left_key, nullable_left_key)].into_iter().collect(),
-        );
-        let covering_right = CardinalityProfile::new(
-            Estimate::exact(10.0),
-            [(right_key, test_column_profile(10.0, 10.0))]
-                .into_iter()
-                .collect(),
-        );
-        let nullable_anti = join_profile_from_conjuncts(
-            &nullable_left,
-            &covering_right,
-            JoinType::LeftAnti,
-            &[predicate],
-            &ctx,
-        );
-        assert_eq!(nullable_anti.rows.value, 50.0);
-        // A selectivity alone does not prove the unmatched key domain or non-null mass.
-        assert_eq!(nullable_anti.columns[&left_key].frequency.value, 25.0);
-        assert_eq!(
-            nullable_anti.columns[&left_key].distinct,
-            surviving_distinct_after_row_filter(&nullable_left.columns[&left_key], 0.5, 25.0),
-        );
-    }
-
-    #[test]
-    fn left_semi_uses_inclusion_when_catalog_samples_would_underestimate() {
-        use arrow_array::{Int64Array, RecordBatch};
-        use optd_sampling::{SampleProvenance, TableSample};
-
-        // Independent sparse samples have no shared keys, but the population NDVs nest.
-        // Sample key presence must not override inclusion for either semi or anti joins.
-        let mut ctx = QueryContext::new();
-        let left_key = ColumnData::new("c_custkey", DataType::Int64).add(&mut ctx);
-        let right_key = ColumnData::new("o_custkey", DataType::Int64).add(&mut ctx);
-        let predicate = equality_expr(&mut ctx, left_key, right_key);
-
-        let left_schema = Arc::new(Schema::new(vec![Field::new(
-            "c_custkey",
-            DataType::Int64,
-            false,
-        )]));
-        let right_schema = Arc::new(Schema::new(vec![Field::new(
-            "o_custkey",
-            DataType::Int64,
-            false,
-        )]));
-        let left_batch = RecordBatch::try_new(
-            left_schema.clone(),
-            vec![Arc::new(Int64Array::from(vec![1_i64, 2, 3, 4]))],
-        )
-        .unwrap();
-        let right_batch = RecordBatch::try_new(
-            right_schema.clone(),
-            vec![Arc::new(Int64Array::from(vec![5_i64, 6, 5, 6]))],
-        )
-        .unwrap();
-        let left_samples = TableSample::try_new(
-            left_schema.clone(),
-            vec![left_batch],
-            4,
-            1_000_000,
-            SampleProvenance::Past,
-        )
-        .unwrap();
-        let right_samples = TableSample::try_new(
-            right_schema.clone(),
-            vec![right_batch],
-            4,
-            1_000_000,
-            SampleProvenance::Past,
-        )
-        .unwrap();
-
-        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
-        catalog
-            .create_table(TableRef::bare("customer"), left_schema, None)
-            .unwrap();
-        catalog
-            .create_table(TableRef::bare("orders"), right_schema, None)
-            .unwrap();
-        catalog
-            .set_table_samples(TableRef::bare("customer"), left_samples)
-            .unwrap();
-        catalog
-            .set_table_samples(TableRef::bare("orders"), right_samples)
-            .unwrap();
-
-        let left = CardinalityProfile::new(
-            Estimate::exact(1_000_000.0),
-            [(
-                left_key,
-                ColumnProfile {
-                    lower_bound: None,
-                    upper_bound: None,
-                    frequency: Estimate::exact(1_000_000.0),
-                    distinct: Estimate::exact(1_000_000.0),
-                    value: Some(ValueId::Base(BaseColumn {
-                        table: TableRef::bare("customer"),
-                        name: "c_custkey".into(),
-                        source: left_key,
-                    })),
-                    sketches: None,
-                    distribution: None,
-                },
-            )]
-            .into_iter()
-            .collect(),
-        );
-        let right = CardinalityProfile::new(
-            Estimate::exact(1_000_000.0),
-            [(
-                right_key,
-                ColumnProfile {
-                    lower_bound: None,
-                    upper_bound: None,
-                    frequency: Estimate::exact(1_000_000.0),
-                    // q4-style large, similarly sized domains with sparse independent samples.
-                    distinct: Estimate::exact(1_000_000.0),
-                    value: Some(ValueId::Base(BaseColumn {
-                        table: TableRef::bare("orders"),
-                        name: "o_custkey".into(),
-                        source: right_key,
-                    })),
-                    sketches: None,
-                    distribution: None,
-                },
-            )]
-            .into_iter()
-            .collect(),
-        );
-
-        let anti = join_profile_from_predicate_with_config(
-            &left,
-            &right,
-            JoinType::LeftAnti,
-            predicate,
-            &ctx,
-            &CardinalityEstimationConfig::default(),
-            Some(catalog.as_ref()),
-        );
-        assert_eq!(anti.rows.value, 0.0);
-        let semi = join_profile_from_predicate_with_config(
-            &left,
-            &right,
-            JoinType::LeftSemi,
-            predicate,
-            &ctx,
-            &CardinalityEstimationConfig::default(),
-            Some(catalog.as_ref()),
-        );
-        assert_eq!(semi.rows.value, left.rows.value);
-    }
-
-    #[test]
     fn filter_tightening_preserves_profile_invariants_and_strict_bounds() {
         let mut ctx = QueryContext::new();
         let column = ColumnData::new("key", DataType::Int64).add(&mut ctx);
@@ -10040,10 +9488,9 @@ mod tests {
     }
 
     #[test]
-    fn not_equal_and_uncertain_sketches_do_not_destroy_ndv_coverage() {
+    fn not_equal_filter_removes_one_value_without_domain_scaling() {
         let mut ctx = QueryContext::new();
         let left_column = ColumnData::new("left", DataType::Int64).add(&mut ctx);
-        let right_column = ColumnData::new("right", DataType::Int64).add(&mut ctx);
         let input = CardinalityProfile::new(
             Estimate::exact(1_000.0),
             [(left_column, test_column_profile(1_000.0, 501.0))]
@@ -10052,147 +9499,6 @@ mod tests {
         );
         let not_equal = scale_profile(input, 0.5, Some((left_column, BinaryOp::NotEq)));
         assert_eq!(not_equal.columns[&left_column].distinct.value, 500.0);
-
-        let encoded = EncodedScalarValue::from_scalar(&ScalarValue::Int64(1)).unwrap();
-        let uncertain = optd_sketches::SpaceSaving::from_entries(
-            1,
-            100,
-            vec![optd_sketches::FrequentItem {
-                value: encoded,
-                frequency: 100,
-                error: 100,
-            }],
-        )
-        .unwrap();
-        let profile = |column| {
-            CardinalityProfile::new(
-                Estimate::exact(100.0),
-                [(
-                    column,
-                    ColumnProfile {
-                        lower_bound: None,
-                        upper_bound: None,
-                        frequency: Estimate::exact(100.0),
-                        distinct: Estimate::exact(100.0),
-                        value: None,
-                        sketches: Some(Arc::new(ColumnSketches {
-                            encoding_version: crate::SKETCH_VALUE_ENCODING_VERSION,
-                            population_rows: 100,
-                            distinct_values: None,
-                            frequent_values: Some(uncertain.clone()),
-                        })),
-                        distribution: None,
-                    },
-                )]
-                .into_iter()
-                .collect(),
-            )
-        };
-        let left = profile(left_column);
-        let right = profile(right_column);
-        let edge = EqualityEdge {
-            left: left_column,
-            right: right_column,
-            null_safe: false,
-            chosen_ndv: Estimate::exact(100.0),
-            left_ndv: Estimate::exact(100.0),
-            right_ndv: Estimate::exact(100.0),
-        };
-        let estimate = equality_edge_estimate(&edge, &left, &right, None, &ctx);
-        assert_eq!(
-            equality_semi_selectivity(&edge, &left, &right, estimate.pair_selectivity, None),
-            1.0,
-        );
-    }
-
-    #[test]
-    fn catalog_keys_enable_only_population_safe_foreign_key_coverage() {
-        let catalog = Arc::new(MemoryCatalog::new("memory", "public"));
-        let key_schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, false)]));
-        for table in ["child", "parent"] {
-            catalog
-                .create_table(TableRef::bare(table), key_schema.clone(), None)
-                .unwrap();
-        }
-        let parent_values = (1..=100).map(Some).collect::<Vec<_>>();
-        let child_values = (1..=100).cycle().take(1_000).map(Some).collect::<Vec<_>>();
-        let mut parent_statistics = table_stats_from_i64_values("id", &parent_values);
-        parent_statistics.constraints.unique_keys =
-            vec![UniqueKey::try_new(vec!["id".to_string()]).unwrap()]
-                .try_into()
-                .unwrap();
-        let mut child_statistics = table_stats_from_i64_values("id", &child_values);
-        child_statistics.constraints.foreign_keys = vec![
-            ForeignKey::try_new(
-                vec!["id".to_string()],
-                TableRef::bare("parent"),
-                vec!["id".to_string()],
-            )
-            .unwrap(),
-        ]
-        .try_into()
-        .unwrap();
-        catalog
-            .set_table_statistics(TableRef::bare("parent"), parent_statistics)
-            .unwrap();
-        catalog
-            .set_table_statistics(TableRef::bare("child"), child_statistics)
-            .unwrap();
-
-        let mut ctx = QueryContext::new();
-        let child_id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
-        let parent_id = ColumnData::new("id", DataType::Int64).add(&mut ctx);
-        let child = OperatorData::Scan(Scan {
-            table: TableRef::bare("child"),
-            columns: vec![child_id],
-        })
-        .add(&mut ctx);
-        let parent = OperatorData::Scan(Scan {
-            table: TableRef::bare("parent"),
-            columns: vec![parent_id],
-        })
-        .add(&mut ctx);
-        let unfiltered_on = equality_expr(&mut ctx, child_id, parent_id);
-        let unfiltered_semi = OperatorData::Join(Join {
-            join_type: JoinType::LeftSemi,
-            on: unfiltered_on,
-            outer: child,
-            inner: parent,
-        })
-        .add(&mut ctx);
-
-        let parent_ref = ExprData::ColumnRef(parent_id).add(&mut ctx);
-        let fifty = ExprData::Literal(ScalarValue::Int64(50)).add(&mut ctx);
-        let predicate = ExprData::Binary {
-            op: BinaryOp::LtEq,
-            left: parent_ref,
-            right: fifty,
-        }
-        .add(&mut ctx);
-        let filtered_parent = OperatorData::Selection(Selection {
-            predicate,
-            input: parent,
-        })
-        .add(&mut ctx);
-        let filtered_on = equality_expr(&mut ctx, child_id, parent_id);
-        let filtered_semi = OperatorData::Join(Join {
-            join_type: JoinType::LeftSemi,
-            on: filtered_on,
-            outer: child,
-            inner: filtered_parent,
-        })
-        .add(&mut ctx);
-
-        let mut analyses = AnalysisContext::new(catalog);
-        let unfiltered = analyses
-            .get::<CardinalityEstimationV1>(&ctx, unfiltered_semi)
-            .unwrap();
-        assert_eq!(unfiltered.rows.value, 1_000.0);
-
-        let filtered = analyses
-            .get::<CardinalityEstimationV1>(&ctx, filtered_semi)
-            .unwrap();
-        assert!(filtered.rows.value > 490.0 && filtered.rows.value < 510.0);
     }
 
     #[test]
@@ -10695,18 +10001,6 @@ mod tests {
         let full = join_profile_from_predicate(&left, &right, JoinType::FullOuter, predicate, &ctx);
         assert_eq!(full.rows.value, 110.0);
         assert_eq!(full.rows.lower, Some(110.0));
-    }
-
-    #[test]
-    fn semi_and_anti_join_respect_an_empty_right_input() {
-        let mut ctx = QueryContext::new();
-        let predicate = ExprData::Literal(ScalarValue::Boolean(true)).add(&mut ctx);
-        let left = CardinalityProfile::new(Estimate::exact(100.0), BTreeMap::new());
-        let right = CardinalityProfile::new(Estimate::exact(0.0), BTreeMap::new());
-        let semi = join_profile_from_predicate(&left, &right, JoinType::LeftSemi, predicate, &ctx);
-        let anti = join_profile_from_predicate(&left, &right, JoinType::LeftAnti, predicate, &ctx);
-        assert_eq!(semi.rows.value, 0.0);
-        assert_eq!(anti.rows.value, 100.0);
     }
 
     #[test]

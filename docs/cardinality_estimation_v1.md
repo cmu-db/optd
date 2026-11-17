@@ -137,8 +137,13 @@ multiplying transitively redundant selectivities. This avoids over-penalizing ch
 Semi/anti joins use PostgreSQL 17's `eqjoinsel_semi` policy rather than a separate custom
 match-probability model. For reliable NDVs without paired MCV lists, equality selectivity is
 `left_non_null_fraction * min(1, right_ndv / left_ndv)`; an unknown/default NDV uses half the
-non-null left population. Only the right NDV is additionally capped by the immediate right input's
-row count, and that cap makes its estimate non-default. With current-population MCV lists on both
+non-null left population. For direct base values, this policy reads the original variable NDV from
+catalog statistics (including catalog HLLs and provider-asserted uniqueness), not the NDV already
+thinned by input filters. Otherwise a selective left filter can falsely imply complete right-side
+coverage. Only the right variable NDV is capped by the immediate right input's row count, and that
+cap makes its estimate non-default. Values without recoverable base statistics use their current
+profile estimate. This lookup is local to semi/anti estimation: filtered column profiles, inner joins,
+and grouping continue to use population-adjusted NDVs. With current-population MCV lists on both
 sides, known matched left MCV frequencies are counted once and only the uncertain remainder uses
 the NDV ratio (after subtracting matched distinct values). Right MCVs are frequency-ranked and
 limited to the capped right NDV. Base-population distributions retained as proxies after joins
@@ -157,8 +162,9 @@ only proven ordinary-equality keys become non-null on semi output.
 This follows [PostgreSQL 17 `selfuncs.c`](https://github.com/postgres/postgres/blob/REL_17_STABLE/src/backend/utils/adt/selfuncs.c)
 (`eqjoinsel_semi` and its caller), adapted to our profile statistics, NULL-safe equality, and existing
 inner-pair estimator. Clause independence and containment remain estimation assumptions, not proofs
-of composite-key overlap. The default-NDV flag is taken from the profile's `EstimateSource::Default`;
-derived profiles use their propagated NDV estimates. Leaf samples estimate filter selectivity only.
+of composite-key overlap. Recovering a catalog variable NDV also recovers its non-default status;
+otherwise the default flag comes from the current profile's `EstimateSource::Default`. Computed
+values do not borrow statistics from an unrelated base column. Leaf samples estimate filter selectivity only.
 
 For inner-pair estimation, compatible ordered ranges detect disjoint domains and estimate numeric/date overlap under
 uniformity. Before the range-fraction fallback, compatible live HLLs use **joint Poisson maximum

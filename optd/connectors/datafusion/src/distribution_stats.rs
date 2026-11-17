@@ -25,7 +25,10 @@ pub(crate) fn build_column_distribution(
         scalar_order(value, value)?;
     }
 
-    let mut sorted = values.iter().map(|value| (*value).clone()).collect::<Vec<_>>();
+    let mut sorted = values
+        .iter()
+        .map(|value| (*value).clone())
+        .collect::<Vec<_>>();
     sorted.sort_by(|left, right| scalar_order(left, right).unwrap_or(Ordering::Equal));
 
     let mut by_freq = Vec::new();
@@ -71,9 +74,8 @@ pub(crate) fn build_column_distribution(
         Vec::new()
     } else {
         let mut residual = by_freq[mcv_count..].to_vec();
-        residual.sort_by(|(left, _), (right, _)| {
-            scalar_order(left, right).unwrap_or(Ordering::Equal)
-        });
+        residual
+            .sort_by(|(left, _), (right, _)| scalar_order(left, right).unwrap_or(Ordering::Equal));
         residual
     };
 
@@ -90,9 +92,7 @@ pub(crate) fn build_column_distribution(
     })
 }
 
-fn build_equi_depth_histogram(
-    residual: &[(ScalarValue, usize)],
-) -> Option<Histogram> {
+fn build_equi_depth_histogram(residual: &[(ScalarValue, usize)]) -> Option<Histogram> {
     let total: usize = residual.iter().map(|(_, frequency)| *frequency).sum();
     if total == 0 {
         return None;
@@ -108,7 +108,9 @@ fn build_equi_depth_histogram(
         let mut frequency = 0usize;
         while index < residual.len() {
             let (value, count) = &residual[index];
-            if frequency > 0 && frequency + count > target_per_bucket && buckets.len() + 1 < target_buckets
+            if frequency > 0
+                && frequency + count > target_per_bucket
+                && buckets.len() + 1 < target_buckets
             {
                 break;
             }

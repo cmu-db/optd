@@ -45,8 +45,7 @@ pub use hypergraph::{
 pub use optd_sampling::{
     ReservoirSampler, SampleError, SamplePredicate, SampleProvenance, SampleRelation, SampleScalar,
     TableSample, equijoin_relations, filter_relation, key_presence_match_fraction,
-    lpbound_equijoin_upper, project_batches,
-    reservoir_sample, table_sample_from_batches,
+    lpbound_equijoin_upper, project_batches, reservoir_sample, table_sample_from_batches,
 };
 pub use optimize::{
     Direction, ExprSimplify, HolisticUnnesting, JoinOrdering, JoinTreeNormalize,
